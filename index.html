@@ -1,0 +1,2159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>URBAN DRIFT — City Explorer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; touch-action: none; }
+  #canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none; z-index: 10;
+  }
+  #crosshair {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px; height: 20px;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,220,100,0.8);
+  }
+  #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+  #crosshair::after  { width: 100%; height: 2px; top: 50%; transform: translateY(-50%); }
+
+  #compass {
+    position: absolute; top: 20px; right: 20px;
+    width: 60px; height: 60px; border: 1px solid rgba(255,200,50,0.4);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.5);
+    font-size: 10px; color: rgba(255,200,50,0.8); letter-spacing: 2px;
+  }
+  #compass-needle {
+    position: absolute; width: 2px; height: 20px;
+    background: linear-gradient(to bottom, #ff4444 50%, rgba(255,200,50,0.5) 50%);
+    top: 10px; left: 50%; transform-origin: bottom center; transform: translateX(-50%);
+  }
+
+  #info-panel {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,200,50,0.7); font-size: 11px; letter-spacing: 2px;
+    text-align: center; line-height: 1.8;
+    background: rgba(0,0,0,0.4); padding: 10px 20px;
+    border: 1px solid rgba(255,200,50,0.2); border-radius: 2px;
+    white-space: nowrap;
+  }
+  @media (max-width: 600px) { #info-panel { display: none; } }
+
+  #encounter-msg {
+    position: absolute; top: 30%; left: 50%; transform: translateX(-50%);
+    color: #fff; font-size: 14px; letter-spacing: 3px;
+    text-shadow: 0 0 20px rgba(180,100,255,0.9), 0 0 40px rgba(180,100,255,0.5);
+    opacity: 0; transition: opacity 0.5s;
+    white-space: nowrap; pointer-events: none; font-style: italic;
+  }
+  #title-card {
+    position: absolute; top: 20px; left: 20px;
+    color: rgba(255,200,50,0.6); font-size: 10px; letter-spacing: 4px;
+    text-transform: uppercase;
+  }
+  #vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.7) 100%);
+    pointer-events: none;
+  }
+
+  /* ── OVERLAY ─────────────────────────────────────────────────── */
+  #overlay {
+    position: fixed; inset: 0; background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100; cursor: pointer; padding: 20px;
+  }
+  #overlay h1 {
+    color: rgba(255,200,50,0.9); font-size: clamp(28px, 8vw, 48px);
+    letter-spacing: clamp(4px, 3vw, 12px);
+    margin-bottom: 10px; font-weight: 100; text-transform: uppercase;
+  }
+  #overlay p {
+    color: rgba(255,200,50,0.4); font-size: clamp(9px, 2vw, 11px); letter-spacing: 4px; margin: 6px 0;
+    text-align: center;
+  }
+  #overlay .start-btn {
+    margin-top: 30px; padding: 14px 44px;
+    border: 1px solid rgba(255,200,50,0.5); color: rgba(255,200,50,0.8);
+    font-size: clamp(11px, 3vw, 13px); letter-spacing: 4px; cursor: pointer;
+    background: transparent; font-family: inherit; transition: all 0.3s;
+  }
+  #overlay .start-btn:hover, #overlay .start-btn:active { background: rgba(255,200,50,0.1); }
+
+  /* ── HEARTS / HUG ────────────────────────────────────────────── */
+  @keyframes floatHeart {
+    0%   { transform: translate(-50%, 0) scale(1); opacity: 1; }
+    60%  { transform: translate(-50%, -60px) scale(1.3); opacity: 0.9; }
+    100% { transform: translate(-50%, -120px) scale(0.5); opacity: 0; }
+  }
+  .heart-particle {
+    position: fixed; font-size: 22px; pointer-events: none; z-index: 200;
+    animation: floatHeart 2s ease-out forwards;
+    text-shadow: 0 0 10px rgba(255,80,120,0.8);
+  }
+  #hug-msg {
+    position: absolute; top: 38%; left: 50%; transform: translateX(-50%);
+    color: rgba(255,150,180,0.95); font-size: 13px; letter-spacing: 4px;
+    text-shadow: 0 0 20px rgba(255,80,120,0.8);
+    opacity: 0; transition: opacity 0.4s; pointer-events: none; white-space: nowrap;
+  }
+
+  /* ── FLIGHT / SPACE ──────────────────────────────────────────── */
+  #flight-indicator {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(100,180,255,0.0); font-size: 13px; letter-spacing: 6px;
+    text-transform: uppercase; pointer-events: none;
+    transition: color 1.5s, opacity 1s;
+    text-shadow: 0 0 30px rgba(100,200,255,0.8);
+  }
+  #space-overlay {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,20,0) 100%);
+    pointer-events: none; opacity: 0; transition: opacity 2s;
+  }
+  #fly-home-btn {
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    padding: 11px 32px; border: 1px solid rgba(100,200,255,0.6);
+    color: rgba(100,200,255,0.9); font-size: 11px; letter-spacing: 4px;
+    background: rgba(0,10,30,0.7); font-family: 'Courier New', monospace;
+    cursor: pointer; pointer-events: all; display: none;
+    text-transform: uppercase; transition: all 0.25s;
+    text-shadow: 0 0 12px rgba(100,200,255,0.6);
+    box-shadow: 0 0 18px rgba(100,200,255,0.15);
+  }
+  #fly-home-btn:hover, #fly-home-btn:active { background: rgba(100,200,255,0.15); }
+  @media (max-width: 600px) { #fly-home-btn { bottom: 200px; font-size: 10px; padding: 9px 20px; } }
+
+  /* ── SCORE ───────────────────────────────────────────────────── */
+  #kill-score {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,80,80,0.0); font-size: 11px; letter-spacing: 4px;
+    transition: color 0.4s; pointer-events: none; white-space: nowrap;
+    text-shadow: 0 0 12px rgba(255,80,80,0.7);
+  }
+  #score-panel {
+    position: absolute; top: 16px; left: 20px;
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,200,50,0.25);
+    padding: 10px 16px; pointer-events: none; min-width: 130px;
+  }
+  #score-panel .score-total {
+    color: rgba(255,200,50,0.95); font-size: 18px; letter-spacing: 3px; font-weight: bold;
+  }
+  #score-panel .score-label {
+    color: rgba(255,200,50,0.4); font-size: 9px; letter-spacing: 3px;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  #score-panel .score-breakdown {
+    color: rgba(255,200,50,0.5); font-size: 9px; letter-spacing: 2px;
+    margin-top: 5px; line-height: 1.7;
+  }
+  @keyframes scoreFlash {
+    0%   { transform: scale(1.4); color: #fff; }
+    100% { transform: scale(1);   color: rgba(255,200,50,0.95); }
+  }
+  .score-pop { animation: scoreFlash 0.4s ease-out forwards; }
+  @keyframes pointsFloat {
+    0%   { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-40px); }
+  }
+  .points-popup {
+    position: fixed; font-size: 15px; font-weight: bold; pointer-events: none;
+    z-index: 300; letter-spacing: 2px; animation: pointsFloat 1.2s ease-out forwards;
+    text-shadow: 0 0 10px currentColor;
+  }
+  @keyframes laserPulse { 0% { opacity:1; } 100% { opacity:0; } }
+
+  /* ── MOBILE CONTROLS ─────────────────────────────────────────── */
+  #mobile-controls {
+    display: none;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 200px; z-index: 20; pointer-events: none;
+  }
+  @media (pointer: coarse), (max-width: 900px) {
+    #mobile-controls { display: block; }
+    #crosshair { display: none; }
+  }
+
+  /* Left joystick zone */
+  #joy-zone {
+    position: absolute; left: 20px; bottom: 20px;
+    width: 140px; height: 140px; pointer-events: all;
+  }
+  #joy-base {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: 2px solid rgba(255,200,50,0.25);
+  }
+  #joy-thumb {
+    position: absolute; width: 52px; height: 52px;
+    border-radius: 50%; background: rgba(255,200,50,0.35);
+    border: 2px solid rgba(255,200,50,0.7);
+    top: 50%; left: 50%; transform: translate(-50%,-50%);
+    transition: background 0.1s;
+  }
+
+  /* Right look zone — invisible drag area */
+  #look-zone {
+    position: absolute; right: 0; bottom: 0;
+    width: calc(100% - 200px); height: 100%;
+    pointer-events: all;
+  }
+
+  /* Action button (hug / shoot) */
+  #action-btn {
+    position: absolute; right: 24px; bottom: 30px;
+    width: 70px; height: 70px; border-radius: 50%;
+    background: rgba(255,100,50,0.25); border: 2px solid rgba(255,100,50,0.7);
+    color: rgba(255,200,100,0.9); font-size: 22px;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: all; cursor: pointer; user-select: none;
+    text-shadow: 0 0 12px rgba(255,100,50,0.9);
+    transition: background 0.1s, transform 0.08s;
+  }
+  #action-btn:active { background: rgba(255,100,50,0.55); transform: scale(0.92); }
+
+  /* Sprint / boost toggle button */
+  #sprint-btn {
+    position: absolute; right: 106px; bottom: 36px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: rgba(100,200,255,0.15); border: 2px solid rgba(100,200,255,0.4);
+    color: rgba(100,200,255,0.9); font-size: 11px; letter-spacing: 1px;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: all; cursor: pointer; user-select: none;
+  }
+  #sprint-btn.active { background: rgba(100,200,255,0.4); }
+
+  /* Fullscreen button */
+  #fs-btn {
+    position: absolute; top: 20px; right: 90px;
+    padding: 7px 12px; border: 1px solid rgba(255,200,50,0.3);
+    color: rgba(255,200,50,0.6); font-size: 14px;
+    background: rgba(0,0,0,0.4); font-family: 'Courier New', monospace;
+    cursor: pointer; pointer-events: all; z-index: 20;
+    border-radius: 3px; transition: all 0.2s;
+    position: fixed;
+  }
+  #fs-btn:hover, #fs-btn:active { background: rgba(255,200,50,0.15); color: rgba(255,200,50,0.9); }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div id="scanline"></div>
+  <h1>URBAN DRIFT</h1>
+  <p>A CITY BETWEEN WORLDS</p>
+  <p style="color:rgba(180,100,255,0.5); font-size:9px; margin-top:4px;">EXPLORERS &amp; ENTITIES AWAIT</p>
+  <button class="start-btn" onclick="startGame()">ENTER THE CITY</button>
+  <p style="margin-top:20px; color:rgba(255,255,255,0.2);">WASD — MOVE &nbsp;|&nbsp; CLICK+DRAG — LOOK &nbsp;|&nbsp; SHIFT — SPRINT &nbsp;|&nbsp; SPACE — HUG</p>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<!-- Fullscreen button — always visible -->
+<button id="fs-btn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+
+<div id="hud">
+  <div id="vignette"></div>
+  <div id="scanline"></div>
+  <div id="crosshair"></div>
+  <div id="title-card">URBAN DRIFT</div>
+  <div id="compass">
+    <div id="compass-needle"></div>
+    <span style="position:absolute;top:4px;font-size:8px;color:#ff4444">N</span>
+  </div>
+  <div id="info-panel">
+    WASD / ARROWS — MOVE &nbsp;|&nbsp; CLICK + DRAG — LOOK &nbsp;|&nbsp; SHIFT — SPRINT &nbsp;|&nbsp; SPACE — HUG
+  </div>
+  <div id="encounter-msg"></div>
+  <div id="hug-msg"></div>
+  <div id="flight-indicator">✦ ENTERING THE VOID ✦</div>
+  <div id="space-overlay"></div>
+  <button id="fly-home-btn" onclick="flyHome()">⬡ FLY HOME</button>
+  <div id="score-panel">
+    <div class="score-label">SCORE</div>
+    <div class="score-total" id="score-total">0</div>
+    <div class="score-breakdown" id="score-breakdown">⚔ 0 ships &nbsp;|&nbsp; ♥ 0 hugs</div>
+  </div>
+  <div id="kill-score"></div>
+</div>
+
+<!-- Mobile on-screen controls -->
+<div id="mobile-controls">
+  <!-- Left joystick -->
+  <div id="joy-zone">
+    <div id="joy-base"></div>
+    <div id="joy-thumb"></div>
+  </div>
+  <!-- Right look zone (invisible drag area) -->
+  <div id="look-zone"></div>
+  <!-- Sprint/boost toggle -->
+  <div id="sprint-btn">BOOST</div>
+  <!-- Action button: hug in city, shoot in space -->
+  <div id="action-btn">♥</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── FULLSCREEN ───────────────────────────────────────────────────────────────
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+document.addEventListener('fullscreenchange', () => {
+  const btn = document.getElementById('fs-btn');
+  if (btn) btn.textContent = document.fullscreenElement ? '✕' : '⛶';
+});
+
+// ─── MOBILE CONTROLS ─────────────────────────────────────────────────────────
+// Virtual joystick — drives keys[] so all existing movement code works unchanged
+const joyZone  = document.getElementById('joy-zone');
+const joyThumb = document.getElementById('joy-thumb');
+const sprintBtn = document.getElementById('sprint-btn');
+const actionBtn = document.getElementById('action-btn');
+
+const JOY_RADIUS = 44; // max thumb travel in px
+let joyActive = false, joyId = null;
+let joyOriginX = 0, joyOriginY = 0;
+let mobileBoost = false;
+
+// Update action button label based on mode
+function updateActionBtn() {
+  if (actionBtn) actionBtn.textContent = flightMode ? '🔫' : '♥';
+}
+
+// Joystick touch handlers
+joyZone.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  joyActive = true; joyId = t.identifier;
+  const r = joyZone.getBoundingClientRect();
+  joyOriginX = r.left + r.width / 2;
+  joyOriginY = r.top  + r.height / 2;
+  updateJoy(t.clientX, t.clientY);
+}, { passive: false });
+
+joyZone.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) updateJoy(t.clientX, t.clientY);
+  }
+}, { passive: false });
+
+joyZone.addEventListener('touchend', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) { resetJoy(); break; }
+  }
+}, { passive: false });
+
+function updateJoy(cx, cy) {
+  let dx = cx - joyOriginX;
+  let dy = cy - joyOriginY;
+  const len = Math.sqrt(dx*dx + dy*dy);
+  if (len > JOY_RADIUS) { dx = dx/len*JOY_RADIUS; dy = dy/len*JOY_RADIUS; }
+  joyThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+  const nx = dx / JOY_RADIUS; // -1..1
+  const ny = dy / JOY_RADIUS;
+  const DEAD = 0.25;
+  keys['KeyW'] = ny < -DEAD;
+  keys['KeyS'] = ny >  DEAD;
+  keys['KeyA'] = nx < -DEAD;
+  keys['KeyD'] = nx >  DEAD;
+}
+
+function resetJoy() {
+  joyActive = false; joyId = null;
+  joyThumb.style.transform = 'translate(-50%, -50%)';
+  keys['KeyW'] = keys['KeyS'] = keys['KeyA'] = keys['KeyD'] = false;
+}
+
+// Sprint/boost button
+sprintBtn.addEventListener('touchstart', e => {
+  e.preventDefault();
+  mobileBoost = !mobileBoost;
+  keys['ShiftLeft'] = mobileBoost;
+  sprintBtn.classList.toggle('active', mobileBoost);
+}, { passive: false });
+
+// Action button (hug / shoot)
+actionBtn.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (flightMode) shootLaser();
+  else tryHug();
+}, { passive: false });
+actionBtn.addEventListener('click', () => {
+  if (flightMode) shootLaser();
+  else tryHug();
+});
+
+// ── LOOK DRAG (right side of screen, mobile) ──────────────────────────────────
+const lookZone = document.getElementById('look-zone');
+let lookActive = false, lookTouchId = null;
+let lookLastX = 0, lookLastY = 0;
+
+lookZone.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  lookActive = true; lookTouchId = t.identifier;
+  lookLastX = t.clientX; lookLastY = t.clientY;
+}, { passive: false });
+
+lookZone.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier !== lookTouchId) continue;
+    const dx = t.clientX - lookLastX;
+    const dy = t.clientY - lookLastY;
+    lookLastX = t.clientX; lookLastY = t.clientY;
+    yaw   -= dx * 0.006;
+    pitch -= dy * 0.006;
+    pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, pitch));
+  }
+}, { passive: false });
+
+lookZone.addEventListener('touchend', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === lookTouchId) { lookActive = false; lookTouchId = null; }
+  }
+}, { passive: false });
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = false; // Disabled — too costly with many lights removed
+renderer.fog = new THREE.FogExp2(0x0a0a18, 0.025);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a18);
+scene.fog = renderer.fog;
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 3000);
+camera.position.set(0, 1.7, 0);
+
+// Pre-place distant city beacon markers (visible from the void before full generation)
+// These are lightweight — just the pillar and ring, no full city geometry
+function placeCityBeaconMarker(seed) {
+  const rand = seededRand(seed.key);
+  const theme = CITY_THEMES[Math.floor(rand() * CITY_THEMES.length)];
+  const group = new THREE.Group();
+  group.position.set(seed.wx, VOID_Y, seed.wz);
+
+  const pillarG = new THREE.CylinderGeometry(0.5, 1.5, 80, 6);
+  const pillarM = new THREE.MeshBasicMaterial({ color: theme.win[0], transparent: true, opacity: 0.5 });
+  const pillar = new THREE.Mesh(pillarG, pillarM);
+  pillar.position.set(0, 40, 0);
+  group.add(pillar);
+
+  const ringG = new THREE.TorusGeometry(8, 0.6, 6, 24);
+  const ring = new THREE.Mesh(ringG, new THREE.MeshBasicMaterial({ color: theme.win[0] }));
+  ring.position.set(0, 82, 0);
+  group.add(ring);
+
+  scene.add(group);
+  // Store the marker so generateRemoteCity can remove it and replace with full city
+  if (!remoteCities.has(seed.key)) {
+    remoteCities.set(seed.key, { wx: seed.wx, wy: VOID_Y, wz: seed.wz, generated: false, markerGroup: group, theme, beacon: ring });
+  }
+}
+
+// ─── LIGHTING ────────────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0x223355, 2.5);
+scene.add(ambient);
+
+const moonLight = new THREE.DirectionalLight(0x6688cc, 1.0);
+moonLight.position.set(30, 50, 20);
+scene.add(moonLight);
+
+// Two shared atmospheric lights — keeps total PointLight count minimal
+const atmosLights = [
+  { x:  30, z:  30, color: 0xffaa44 },
+  { x: -30, z: -30, color: 0x4488ff },
+];
+atmosLights.forEach(l => {
+  const pl = new THREE.PointLight(l.color, 1.2, 80);
+  pl.position.set(l.x, 8, l.z);
+  scene.add(pl);
+});
+
+function addStreetLight(x, z, color = 0xffcc44) {
+  // NO PointLight — use emissive globe only to stay under uniform limits
+  const poleG = new THREE.CylinderGeometry(0.05, 0.05, 6, 6);
+  const poleM = new THREE.MeshLambertMaterial({ color: 0x333333 });
+  const pole = new THREE.Mesh(poleG, poleM);
+  pole.position.set(x, 3, z);
+  scene.add(pole);
+  const globeG = new THREE.SphereGeometry(0.25, 8, 8);
+  const globeM = new THREE.MeshBasicMaterial({ color });
+  const globe = new THREE.Mesh(globeG, globeM);
+  globe.position.set(x, 6.1, z);
+  scene.add(globe);
+}
+
+// ─── GROUND ──────────────────────────────────────────────────────────────────
+function makeGroundMat(isDark) {
+  return new THREE.MeshLambertMaterial({ color: isDark ? 0x111118 : 0x1a1a28 });
+}
+// Main road grid
+for (let i = -10; i <= 10; i++) {
+  for (let j = -10; j <= 10; j++) {
+    const isRoadX = (i % 4 === 0);
+    const isRoadZ = (j % 4 === 0);
+    if (!isRoadX && !isRoadZ) continue;
+    const g = new THREE.PlaneGeometry(8, 8);
+    const m = new THREE.MeshLambertMaterial({ color: isRoadX && isRoadZ ? 0x1e1e30 : 0x141420 });
+    const tile = new THREE.Mesh(g, m);
+    tile.rotation.x = -Math.PI / 2;
+    tile.position.set(i*8, 0, j*8);
+    tile.receiveShadow = true;
+    scene.add(tile);
+  }
+}
+// Sidewalk/block ground
+for (let i = -10; i <= 10; i++) {
+  for (let j = -10; j <= 10; j++) {
+    if (i % 4 === 0 || j % 4 === 0) continue;
+    const g = new THREE.PlaneGeometry(8, 8);
+    const tile = new THREE.Mesh(g, makeGroundMat(false));
+    tile.rotation.x = -Math.PI / 2;
+    tile.position.set(i*8, 0.02, j*8);
+    tile.receiveShadow = true;
+    scene.add(tile);
+  }
+}
+
+// ─── BUILDINGS ───────────────────────────────────────────────────────────────
+const buildingColors = [0x1a1a2e, 0x16213e, 0x0f3460, 0x1b1b2f, 0x2c2c54, 0x1a1a2a];
+const windowColors  = [0xffcc44, 0xff6644, 0x44aaff, 0xcc44ff, 0x44ffaa];
+
+// Collision boxes: { minX, maxX, minZ, maxZ, minY, maxY }
+const collisionBoxes = [];
+const PLAYER_RADIUS = 0.4;
+
+function addBuilding(x, z, w, d, h) {
+  const group = new THREE.Group();
+  const g = new THREE.BoxGeometry(w, h, d);
+  const col = buildingColors[Math.floor(Math.random() * buildingColors.length)];
+  const m = new THREE.MeshLambertMaterial({ color: col });
+  const b = new THREE.Mesh(g, m);
+  b.position.y = h / 2;
+  b.castShadow = true; b.receiveShadow = true;
+  group.add(b);
+  for (let floor = 1; floor < h - 1; floor += 2.5) {
+    for (let side = -w/2 + 0.8; side < w/2; side += 1.8) {
+      if (Math.random() < 0.3) continue;
+      const wg = new THREE.PlaneGeometry(0.8, 1.2);
+      const wc = windowColors[Math.floor(Math.random() * windowColors.length)];
+      const lit = Math.random() < 0.6;
+      const wm = new THREE.MeshBasicMaterial({ color: lit ? wc : 0x111122 });
+      const win = new THREE.Mesh(wg, wm);
+      win.position.set(side, floor + 0.8, d/2 + 0.01);
+      group.add(win);
+      const wb = win.clone();
+      wb.position.z = -(d/2 + 0.01);
+      wb.rotation.y = Math.PI;
+      group.add(wb);
+    }
+  }
+  group.position.set(x, 0, z);
+  scene.add(group);
+  // Register collision box with a small margin
+  collisionBoxes.push({ minX: x - w/2, maxX: x + w/2, minZ: z - d/2, maxZ: z + d/2, maxY: h });
+}
+
+// Place buildings in blocks
+for (let bx = -9; bx <= 9; bx++) {
+  for (let bz = -9; bz <= 9; bz++) {
+    if (bx % 4 === 0 || bz % 4 === 0) continue;
+    const cx = bx * 8, cz = bz * 8;
+    const h = 5 + Math.random() * 30;
+    const w = 3 + Math.random() * 4;
+    const d = 3 + Math.random() * 4;
+    addBuilding(cx, cz, w, d, h);
+  }
+}
+
+// ─── STAIRS ──────────────────────────────────────────────────────────────────
+function addStaircase(x, z, direction) {
+  const group = new THREE.Group();
+  const stepMat = new THREE.MeshLambertMaterial({ color: 0x222233 });
+  for (let s = 0; s < 8; s++) {
+    const sg = new THREE.BoxGeometry(3, 0.2, 0.8);
+    const step = new THREE.Mesh(sg, stepMat);
+    step.position.set(0, s * 0.3, s * 0.8);
+    step.castShadow = true;
+    group.add(step);
+  }
+  group.position.set(x, 0, z);
+  group.rotation.y = direction;
+  scene.add(group);
+  return group;
+}
+addStaircase(-16, -8, 0);
+addStaircase(16, 8, Math.PI);
+addStaircase(-8, 16, Math.PI / 2);
+addStaircase(8, -16, -Math.PI / 2);
+
+// ─── ALLEYWAY DETAILS ────────────────────────────────────────────────────────
+function addDumpster(x, z) {
+  const g = new THREE.BoxGeometry(1.5, 1, 0.8);
+  const m = new THREE.MeshLambertMaterial({ color: 0x224422 });
+  const d = new THREE.Mesh(g, m);
+  d.position.set(x, 0.5, z);
+  scene.add(d);
+  collisionBoxes.push({ minX: x - 0.75, maxX: x + 0.75, minZ: z - 0.4, maxZ: z + 0.4, maxY: 1 });
+}
+function addBarrel(x, z) {
+  const g = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
+  // Glowing fire barrel uses emissive orange, no PointLight
+  const isFire = Math.random() < 0.4;
+  const m = new THREE.MeshLambertMaterial({ color: isFire ? 0xff6600 : 0x442222, emissive: isFire ? 0x331100 : 0x000000 });
+  const b = new THREE.Mesh(g, m);
+  b.position.set(x, 0.4, z);
+  scene.add(b);
+}
+
+for (let i = 0; i < 20; i++) {
+  const rx = (Math.floor(Math.random()*6) * 8 + 2) * (Math.random() < 0.5 ? 1 : -1);
+  const rz = (Math.floor(Math.random()*6) * 8 + 2) * (Math.random() < 0.5 ? 1 : -1);
+  addDumpster(rx, rz);
+  addBarrel(rx + 2, rz);
+}
+
+// Street lights along roads
+for (let i = -8; i <= 8; i += 4) {
+  for (let j = -8; j <= 8; j += 8) {
+    const lightColors = [0xffcc44, 0x44aaff, 0xcc44ff, 0xff6644];
+    const lc = lightColors[Math.floor(Math.random() * lightColors.length)];
+    addStreetLight(i*8 + 1.5, j*8 + 1.5, lc);
+    addStreetLight(i*8 - 1.5, j*8 - 1.5, lc);
+  }
+}
+
+// ─── OTHERWORLDLY PORTALS ─────────────────────────────────────────────────────
+const portals = [];
+function addPortal(x, z) {
+  const group = new THREE.Group();
+  const ring = new THREE.TorusGeometry(1.5, 0.12, 16, 60);
+  const rm = new THREE.MeshBasicMaterial({ color: 0xcc44ff });
+  const r = new THREE.Mesh(ring, rm);
+  group.add(r);
+  const innerG = new THREE.CircleGeometry(1.4, 32);
+  const innerM = new THREE.MeshBasicMaterial({ color: 0x220033, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
+  const inner = new THREE.Mesh(innerG, innerM);
+  group.add(inner);
+  // No PointLight — keep uniform count down
+  group.position.set(x, 2.5, z);
+  scene.add(group);
+  portals.push(group);
+}
+addPortal(-32, -32);
+addPortal(32, 32);
+addPortal(-32, 32);
+addPortal(32, -32);
+
+// ─── ENTITIES (NPCs + CREATURES) ─────────────────────────────────────────────
+const entities = [];
+
+function makeExplorer(x, z) {
+  const g = new THREE.Group();
+  const bodyG = new THREE.CylinderGeometry(0.22, 0.22, 1.2, 8);
+  const coatColors = [0x334466, 0x443333, 0x335544, 0x554433];
+  const bodyM = new THREE.MeshLambertMaterial({ color: coatColors[Math.floor(Math.random()*4)] });
+  const body = new THREE.Mesh(bodyG, bodyM); body.position.y = 0.8;
+  g.add(body);
+  const headG = new THREE.SphereGeometry(0.2, 8, 8);
+  const headM = new THREE.MeshLambertMaterial({ color: 0xddaa88 });
+  const head = new THREE.Mesh(headG, headM); head.position.y = 1.7;
+  g.add(head);
+  // Hat
+  const hatG = new THREE.CylinderGeometry(0.18, 0.22, 0.3, 8);
+  const hatM = new THREE.MeshLambertMaterial({ color: 0x222222 });
+  const hat = new THREE.Mesh(hatG, hatM); hat.position.y = 1.95;
+  g.add(hat);
+  const legG = new THREE.CylinderGeometry(0.08, 0.08, 0.8, 6);
+  const legM = new THREE.MeshLambertMaterial({ color: 0x222233 });
+  const legL = new THREE.Mesh(legG, legM); legL.position.set(-0.12, 0.4, 0); g.add(legL);
+  const legR = new THREE.Mesh(legG, legM); legR.position.set(0.12, 0.4, 0); g.add(legR);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  const speed = 0.01 + Math.random() * 0.02;
+  const angle = Math.random() * Math.PI * 2;
+  entities.push({ mesh: g, type: 'explorer', speed, angle, legL, legR, walkTimer: 0,
+    waypoints: genWaypoints(), wpIdx: 0, name: pickExplorerName() });
+  return g;
+}
+
+const explorerNames = ['DRIFTER MAEL','NAVIGATOR SERA','WANDERER COLE','PILGRIM VERA','SCOUT JUNO','OBSERVER TAX'];
+function pickExplorerName() { return explorerNames[Math.floor(Math.random()*explorerNames.length)]; }
+
+function genWaypoints() {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    pts.push(new THREE.Vector3(
+      (Math.random() - 0.5) * 80,
+      0,
+      (Math.random() - 0.5) * 80
+    ));
+  }
+  return pts;
+}
+
+// Creature 1: Floating Jellyfish Wraith
+function makeWraith(x, z) {
+  const g = new THREE.Group();
+  const bodyG = new THREE.SphereGeometry(0.6, 12, 12);
+  const bodyM = new THREE.MeshBasicMaterial({ color: 0xaa66ff, transparent: true, opacity: 0.75 });
+  const body = new THREE.Mesh(bodyG, bodyM); body.position.y = 0;
+  g.add(body);
+  for (let t = 0; t < 8; t++) {
+    const tg = new THREE.CylinderGeometry(0.02, 0.02, 1.2 + Math.random(), 4);
+    const tm = new THREE.MeshBasicMaterial({ color: 0xcc88ff, transparent: true, opacity: 0.5 });
+    const tentacle = new THREE.Mesh(tg, tm);
+    const ang = (t / 8) * Math.PI * 2;
+    tentacle.position.set(Math.cos(ang) * 0.4, -0.9, Math.sin(ang) * 0.4);
+    tentacle.rotation.z = (Math.random() - 0.5) * 0.4;
+    g.add(tentacle);
+  }
+  // No PointLight — MeshBasicMaterial is always bright
+  g.position.set(x, 3 + Math.random() * 2, z);
+  scene.add(g);
+  entities.push({ mesh: g, type: 'wraith', speed: 0.005 + Math.random() * 0.01,
+    angle: Math.random() * Math.PI * 2, floatOffset: Math.random() * Math.PI * 2,
+    waypoints: genWaypoints(), wpIdx: 0, name: pickWraithName() });
+}
+const wraithNames = ['THE HOLLOW','VEIL DRIFTER','PALE ECHO','THE SIGHING ONE','MIRROR SHADE','DEPTH SPECTER'];
+function pickWraithName() { return wraithNames[Math.floor(Math.random()*wraithNames.length)]; }
+
+// Creature 2: Geometric Golem
+function makeGolem(x, z) {
+  const g = new THREE.Group();
+  const torsoG = new THREE.BoxGeometry(1.2, 1.5, 0.8);
+  const mat = new THREE.MeshLambertMaterial({ color: 0x224455 });
+  const torso = new THREE.Mesh(torsoG, mat); torso.position.y = 1.4; g.add(torso);
+  const headG = new THREE.OctahedronGeometry(0.5);
+  const headM = new THREE.MeshBasicMaterial({ color: 0x44aaff, wireframe: true });
+  const head = new THREE.Mesh(headG, headM); head.position.y = 2.7; g.add(head);
+  const eyeG = new THREE.SphereGeometry(0.12, 6, 6);
+  const eyeM = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+  const eye = new THREE.Mesh(eyeG, eyeM); eye.position.set(0, 2.7, 0.45); g.add(eye);
+  // No PointLight — eye uses MeshBasicMaterial (always lit)
+  const armG = new THREE.BoxGeometry(0.3, 1.4, 0.3);
+  const armL = new THREE.Mesh(armG, mat); armL.position.set(-0.85, 1.3, 0); g.add(armL);
+  const armR = new THREE.Mesh(armG, mat); armR.position.set(0.85, 1.3, 0); g.add(armR);
+  const legG2 = new THREE.BoxGeometry(0.4, 1.2, 0.4);
+  const legL2 = new THREE.Mesh(legG2, mat); legL2.position.set(-0.3, 0.6, 0); g.add(legL2);
+  const legR2 = new THREE.Mesh(legG2, mat); legR2.position.set(0.3, 0.6, 0); g.add(legR2);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  entities.push({ mesh: g, type: 'golem', speed: 0.008 + Math.random() * 0.008,
+    angle: Math.random() * Math.PI * 2, head,
+    waypoints: genWaypoints(), wpIdx: 0, name: pickGolemName() });
+}
+const golemNames = ['IRON WITNESS','THE ARCHITECT','STEEL REVENANT','FORM KEEPER','VOID BUILDER','LOGIC WARDEN'];
+function pickGolemName() { return golemNames[Math.floor(Math.random()*golemNames.length)]; }
+
+// Creature 3: Shadow Stalker (low, fast, serpentine)
+function makeStalker(x, z) {
+  const g = new THREE.Group();
+  for (let s = 0; s < 6; s++) {
+    const sg = new THREE.SphereGeometry(0.3 - s*0.03, 6, 6);
+    const sm = new THREE.MeshBasicMaterial({ color: 0xff2244, transparent: true, opacity: 0.8 - s*0.1 });
+    const seg = new THREE.Mesh(sg, sm);
+    seg.position.set(0, 0.3, s * -0.4);
+    g.add(seg);
+  }
+  const eyeG = new THREE.SphereGeometry(0.08, 6, 6);
+  const eyeM = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  const eyeL = new THREE.Mesh(eyeG, eyeM); eyeL.position.set(-0.15, 0.5, 0.1); g.add(eyeL);
+  const eyeR = new THREE.Mesh(eyeG, eyeM); eyeR.position.set(0.15, 0.5, 0.1); g.add(eyeR);
+  // No PointLight
+  g.position.set(x, 0, z);
+  scene.add(g);
+  entities.push({ mesh: g, type: 'stalker', speed: 0.025 + Math.random() * 0.015,
+    angle: Math.random() * Math.PI * 2,
+    waypoints: genWaypoints(), wpIdx: 0, name: pickStalkerName() });
+}
+const stalkerNames = ['THE HUNGER','RED SHADE','NIGHT CRAWLER','VOID TONGUE','FLICKER BEAST','UNRAVELING'];
+function pickStalkerName() { return stalkerNames[Math.floor(Math.random()*stalkerNames.length)]; }
+
+// Spawn entities
+for (let i = 0; i < 8; i++) makeExplorer((Math.random()-0.5)*80, (Math.random()-0.5)*80);
+for (let i = 0; i < 5; i++) makeWraith((Math.random()-0.5)*70, (Math.random()-0.5)*70);
+for (let i = 0; i < 4; i++) makeGolem((Math.random()-0.5)*70, (Math.random()-0.5)*70);
+for (let i = 0; i < 4; i++) makeStalker((Math.random()-0.5)*70, (Math.random()-0.5)*70);
+
+// ─── PLAYER CONTROLS ─────────────────────────────────────────────────────────
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+let yaw = 0, pitch = 0;
+let mouseDragging = false;
+let lastMouseX = 0, lastMouseY = 0;
+
+function startGame() {
+  document.getElementById('overlay').style.display = 'none';
+  canvas.focus();
+}
+
+// Mouse drag to look (works without pointer lock)
+canvas.addEventListener('mousedown', e => {
+  mouseDragging = true;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  canvas.style.cursor = 'grabbing';
+});
+document.addEventListener('mouseup', () => {
+  mouseDragging = false;
+  canvas.style.cursor = 'crosshair';
+});
+document.addEventListener('mousemove', e => {
+  if (!mouseDragging) return;
+  const dx = e.clientX - lastMouseX;
+  const dy = e.clientY - lastMouseY;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  yaw   -= dx * 0.004;
+  pitch -= dy * 0.004;
+  pitch  = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, pitch));
+});
+
+// Touch support for mobile
+let touchStartX = 0, touchStartY = 0;
+canvas.addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  const dx = e.touches[0].clientX - touchStartX;
+  const dy = e.touches[0].clientY - touchStartY;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  yaw   -= dx * 0.005;
+  pitch -= dy * 0.005;
+  pitch  = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, pitch));
+}, { passive: true });
+
+// ─── ENCOUNTER MESSAGES ──────────────────────────────────────────────────────
+const encounterEl = document.getElementById('encounter-msg');
+let encounterTimer = 0;
+let lastEncounterEntity = null;
+
+function triggerEncounter(entity) {
+  if (lastEncounterEntity === entity && encounterTimer > 0) return;
+  lastEncounterEntity = entity;
+  encounterTimer = 3;
+  let msg = '';
+  if (entity.type === 'explorer') msg = `⟦ ${entity.name} PASSES ⟧`;
+  else if (entity.type === 'wraith') msg = `✦ ${entity.name} DRIFTS NEAR ✦`;
+  else if (entity.type === 'golem') msg = `▣ ${entity.name} OBSERVES YOU ▣`;
+  else if (entity.type === 'stalker') msg = `⚠ ${entity.name} CIRCLES YOU ⚠`;
+  encounterEl.textContent = msg;
+  encounterEl.style.color = entity.type === 'explorer' ? '#aaddff' :
+                             entity.type === 'wraith'   ? '#cc88ff' :
+                             entity.type === 'golem'    ? '#44aaff' : '#ff4444';
+  encounterEl.style.opacity = '1';
+}
+
+// ─── HUG SYSTEM ──────────────────────────────────────────────────────────────
+const HUG_RANGE = 4.0;
+const hugMsgEl = document.getElementById('hug-msg');
+let hugCooldown = 0;
+const hugTimers = new Map(); // entity -> animation timer
+const heartEmojis = ['❤️','💛','💚','💙','💜','🧡','🤍','💗','💖','💝'];
+
+function spawnHearts(worldX, worldY, worldZ, count = 8) {
+  // Project world pos to screen
+  const vec = new THREE.Vector3(worldX, worldY, worldZ);
+  vec.project(camera);
+  const screenX = (vec.x * 0.5 + 0.5) * window.innerWidth;
+  const screenY = (-vec.y * 0.5 + 0.5) * window.innerHeight;
+  if (vec.z > 1) return; // behind camera
+
+  for (let i = 0; i < count; i++) {
+    const heart = document.createElement('div');
+    heart.className = 'heart-particle';
+    heart.textContent = heartEmojis[Math.floor(Math.random() * heartEmojis.length)];
+    const spread = (Math.random() - 0.5) * 80;
+    heart.style.left = (screenX + spread) + 'px';
+    heart.style.top  = screenY + 'px';
+    heart.style.animationDelay = (Math.random() * 0.5) + 's';
+    heart.style.fontSize = (16 + Math.random() * 14) + 'px';
+    document.body.appendChild(heart);
+    setTimeout(() => heart.remove(), 2500);
+  }
+}
+
+function tryHug() {
+  if (hugCooldown > 0) return;
+  // Find nearest explorer
+  let nearest = null, nearestDist = Infinity;
+  for (const ent of entities) {
+    if (ent.type !== 'explorer') continue;
+    const dx = camera.position.x - ent.mesh.position.x;
+    const dz = camera.position.z - ent.mesh.position.z;
+    const d  = Math.sqrt(dx*dx + dz*dz);
+    if (d < HUG_RANGE && d < nearestDist) { nearest = ent; nearestDist = d; }
+  }
+  if (!nearest) return;
+
+  hugCooldown = 3;
+
+  // Freeze explorer briefly — face toward player
+  const dx = camera.position.x - nearest.mesh.position.x;
+  const dz = camera.position.z - nearest.mesh.position.z;
+  nearest.mesh.rotation.y = Math.atan2(dx, dz);
+  nearest.hugFrozen = 2.5; // seconds frozen
+
+  // Raise arms (rotate arm meshes if present)
+  nearest.mesh.children.forEach(child => {
+    // Arms are at x ±0.12 y ~0.8 — crude detection by position
+    if (Math.abs(child.position.x) > 0.08 && child.position.y > 0.6 && child.position.y < 1.0) {
+      child.userData.origRotZ = child.rotation.z;
+      child.rotation.z = child.position.x > 0 ? Math.PI / 2.5 : -Math.PI / 2.5;
+      setTimeout(() => { child.rotation.z = child.userData.origRotZ || 0; }, 2000);
+    }
+  });
+
+  // Hearts above the explorer's head
+  spawnHearts(nearest.mesh.position.x, nearest.mesh.position.y + 2.5, nearest.mesh.position.z, 10);
+  // And a few from player's perspective center
+  spawnHearts(camera.position.x, camera.position.y + 0.5, camera.position.z - 1.5, 5);
+
+  // HUD message
+  hugMsgEl.textContent = `♥ ${nearest.name} EMBRACES YOU ♥`;
+  hugMsgEl.style.opacity = '1';
+  setTimeout(() => { hugMsgEl.style.opacity = '0'; }, 2500);
+
+  // Score +5 for hug
+  hugCount++;
+  addScore(5, window.innerWidth / 2, window.innerHeight * 0.42, '#ff88bb');
+}
+
+// Spacebar: hug in city, shoot laser in space
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (flightMode) shootLaser();
+    else tryHug();
+  }
+});
+
+// ─── SPACESHIPS ───────────────────────────────────────────────────────────────
+const spaceships = [];
+const lasers = [];
+const explosions = [];
+let killCount = 0;
+let hugCount = 0;
+let totalScore = 0;
+const killScoreEl = document.getElementById('kill-score');
+const scoreTotalEl = document.getElementById('score-total');
+const scoreBreakdownEl = document.getElementById('score-breakdown');
+let shipSpawnTimer = 0;
+const SHIP_SPAWN_INTERVAL = 4;
+
+function addScore(points, screenX, screenY, color) {
+  totalScore += points;
+  scoreTotalEl.textContent = totalScore;
+  // Animate the total
+  scoreTotalEl.classList.remove('score-pop');
+  void scoreTotalEl.offsetWidth; // reflow to restart animation
+  scoreTotalEl.classList.add('score-pop');
+  scoreBreakdownEl.textContent = `⚔ ${killCount} ships  |  ♥ ${hugCount} hugs`;
+
+  // Floating +points popup
+  const popup = document.createElement('div');
+  popup.className = 'points-popup';
+  popup.textContent = `+${points}`;
+  popup.style.color = color;
+  popup.style.left = (screenX + (Math.random() - 0.5) * 40) + 'px';
+  popup.style.top  = (screenY - 20) + 'px';
+  document.body.appendChild(popup);
+  setTimeout(() => popup.remove(), 1300);
+}
+
+const shipHullColors = [0x224466, 0x442244, 0x224422, 0x664422, 0x222266];
+const shipEngineColors = [0x44aaff, 0xff4488, 0x44ffaa, 0xffaa44, 0xcc44ff];
+
+function makeSpaceship() {
+  const group = new THREE.Group();
+  const hullCol  = shipHullColors[Math.floor(Math.random() * shipHullColors.length)];
+  const engCol   = shipEngineColors[Math.floor(Math.random() * shipEngineColors.length)];
+
+  // Hull body
+  const hullG = new THREE.CylinderGeometry(0.3, 0.8, 3.5, 8);
+  const hullM = new THREE.MeshLambertMaterial({ color: hullCol });
+  const hull  = new THREE.Mesh(hullG, hullM);
+  hull.rotation.x = Math.PI / 2;
+  group.add(hull);
+
+  // Cockpit dome
+  const cockG = new THREE.SphereGeometry(0.55, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+  const cockM = new THREE.MeshBasicMaterial({ color: 0x88ddff, transparent: true, opacity: 0.7 });
+  const cock  = new THREE.Mesh(cockG, cockM);
+  cock.position.z = 1.2; cock.rotation.x = -Math.PI / 2;
+  group.add(cock);
+
+  // Wings
+  const wingG = new THREE.BoxGeometry(4.5, 0.12, 1.4);
+  const wingM = new THREE.MeshLambertMaterial({ color: hullCol });
+  const wings = new THREE.Mesh(wingG, wingM);
+  wings.position.z = -0.5;
+  group.add(wings);
+
+  // Engine glow — MeshBasicMaterial, no PointLight
+  const engG = new THREE.CylinderGeometry(0.22, 0.35, 0.5, 8);
+  const engM = new THREE.MeshBasicMaterial({ color: engCol });
+  const eng  = new THREE.Mesh(engG, engM);
+  eng.rotation.x = Math.PI / 2; eng.position.z = -2.0;
+  group.add(eng);
+
+  // Second smaller nozzle ring for detail
+  const nozzleG = new THREE.TorusGeometry(0.28, 0.05, 6, 12);
+  const nozzleM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const nozzle = new THREE.Mesh(nozzleG, nozzleM);
+  nozzle.position.z = -2.2;
+  group.add(nozzle);
+
+  group.userData.radius = 2.2;
+  scene.add(group);
+  return group;
+}
+
+function spawnShip() {
+  const mesh = makeSpaceship();
+
+  // Spawn all around the player — any direction, consistent distance
+  const spawnAngle = Math.random() * Math.PI * 2;
+  const dist = 80 + Math.random() * 40;
+  const spawnPos = new THREE.Vector3(
+    camera.position.x + Math.sin(spawnAngle) * dist,
+    camera.position.y + (Math.random() - 0.5) * 25,
+    camera.position.z + Math.cos(spawnAngle) * dist
+  );
+  mesh.position.copy(spawnPos);
+
+  // Always fly STRAIGHT at the player — tiny jitter so they don't all overlap
+  const target = camera.position.clone().add(
+    new THREE.Vector3((Math.random()-0.5)*4, (Math.random()-0.5)*4, (Math.random()-0.5)*4)
+  );
+  const flyDir = target.sub(spawnPos).normalize();
+  const speed = 12 + Math.random() * 10;
+
+  // Orient ship nose toward player
+  const dummy = new THREE.Object3D();
+  dummy.position.copy(spawnPos);
+  dummy.lookAt(spawnPos.clone().add(flyDir));
+  mesh.quaternion.copy(dummy.quaternion);
+  mesh.rotateX(Math.PI / 2);
+
+  spaceships.push({ mesh, flyDir, speed, alive: true, life: 20.0 });
+}
+
+// ─── LASER SYSTEM ────────────────────────────────────────────────────────────
+const laserMat = new THREE.MeshBasicMaterial({ color: 0xff4400 });
+const laserGeo = new THREE.CylinderGeometry(0.06, 0.06, 4, 6);
+let laserCooldown = 0;
+
+function shootLaser() {
+  if (laserCooldown > 0) return;
+  laserCooldown = 0.18;
+
+  // Fire two offset lasers (wing-cannon style)
+  for (let side = -1; side <= 1; side += 2) {
+    const laserMesh = new THREE.Mesh(laserGeo, laserMat.clone());
+    laserMesh.material.color.setHex(Math.random() < 0.5 ? 0xff4400 : 0x00ccff);
+
+    // Start at camera, offset sideways slightly
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    const camRight = new THREE.Vector3().crossVectors(camDir, camera.up).normalize();
+
+    laserMesh.position.copy(camera.position)
+      .addScaledVector(camDir, 2)
+      .addScaledVector(camRight, side * 0.5);
+
+    laserMesh.quaternion.copy(camera.quaternion);
+    laserMesh.rotateX(Math.PI / 2);
+
+    // No PointLight on lasers — too many uniform slots consumed
+    scene.add(laserMesh);
+    lasers.push({ mesh: laserMesh, dir: camDir.clone(), speed: 120, life: 1.8 });
+  }
+  playLaserSound();
+}
+
+// ─── AUDIO SYSTEM ────────────────────────────────────────────────────────────
+let audioCtx = null;
+let musicNodes = null;
+let musicVolume = null;
+let musicPlaying = false;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Master reverb convolver for epic space feel
+  const reverbNode = audioCtx.createConvolver();
+  const reverbLen = audioCtx.sampleRate * 3;
+  const reverbBuf = audioCtx.createBuffer(2, reverbLen, audioCtx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = reverbBuf.getChannelData(ch);
+    for (let i = 0; i < reverbLen; i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/reverbLen, 2.5);
+  }
+  reverbNode.buffer = reverbBuf;
+
+  // Reverb wet/dry mix
+  const reverbGain = audioCtx.createGain(); reverbGain.gain.value = 0.45;
+  const dryGain = audioCtx.createGain(); dryGain.gain.value = 0.55;
+  reverbNode.connect(reverbGain);
+  reverbGain.connect(audioCtx.destination);
+
+  musicVolume = audioCtx.createGain();
+  musicVolume.gain.value = 0;
+  musicVolume.connect(dryGain);
+  musicVolume.connect(reverbNode);
+  dryGain.connect(audioCtx.destination);
+
+  // ── EPIC SPACE SOUNDTRACK ──────────────────────────────────────────────────
+  // Built from layered oscillators: deep bass drone, mid pads, high arpeggios
+  const t = audioCtx.currentTime;
+
+  // 1. Deep bass pulse — sub-bass throb
+  const bassOsc = audioCtx.createOscillator();
+  const bassGain = audioCtx.createGain();
+  const bassFilter = audioCtx.createBiquadFilter();
+  bassOsc.type = 'sawtooth';
+  bassOsc.frequency.value = 36;
+  bassFilter.type = 'lowpass'; bassFilter.frequency.value = 90; bassFilter.Q.value = 2;
+  bassGain.gain.value = 0.22;
+  bassOsc.connect(bassFilter); bassFilter.connect(bassGain); bassGain.connect(musicVolume);
+
+  // Bass pulse envelope — rhythmic throbbing every 2s
+  function scheduleBassThump() {
+    if (!musicPlaying) return;
+    const now = audioCtx.currentTime;
+    bassGain.gain.cancelScheduledValues(now);
+    bassGain.gain.setValueAtTime(0.28, now);
+    bassGain.gain.exponentialRampToValueAtTime(0.08, now + 0.6);
+    bassGain.gain.linearRampToValueAtTime(0.12, now + 1.0);
+    setTimeout(scheduleBassThump, 2000);
+  }
+
+  // 2. Mid-range dark pad — slowly evolving
+  const padOsc1 = audioCtx.createOscillator();
+  const padOsc2 = audioCtx.createOscillator();
+  const padGain = audioCtx.createGain();
+  const padFilter = audioCtx.createBiquadFilter();
+  padOsc1.type = 'sawtooth'; padOsc1.frequency.value = 72;
+  padOsc2.type = 'sawtooth'; padOsc2.frequency.value = 72.4; // slight detune for chorus
+  padFilter.type = 'bandpass'; padFilter.frequency.value = 320; padFilter.Q.value = 0.8;
+  padGain.gain.value = 0.08;
+  padOsc1.connect(padFilter); padOsc2.connect(padFilter);
+  padFilter.connect(padGain); padGain.connect(musicVolume);
+
+  // 3. Sweeping high pad — filter sweep for tension
+  const sweepOsc = audioCtx.createOscillator();
+  const sweepGain = audioCtx.createGain();
+  const sweepFilter = audioCtx.createBiquadFilter();
+  sweepOsc.type = 'sawtooth'; sweepOsc.frequency.value = 144;
+  sweepFilter.type = 'lowpass'; sweepFilter.Q.value = 5;
+  sweepGain.gain.value = 0.06;
+  sweepOsc.connect(sweepFilter); sweepFilter.connect(sweepGain); sweepGain.connect(musicVolume);
+
+  // Slow filter sweep automation — eerie rising/falling effect
+  function scheduleSweep() {
+    if (!musicPlaying) return;
+    const now = audioCtx.currentTime;
+    sweepFilter.frequency.cancelScheduledValues(now);
+    sweepFilter.frequency.setValueAtTime(200, now);
+    sweepFilter.frequency.linearRampToValueAtTime(2400, now + 8);
+    sweepFilter.frequency.linearRampToValueAtTime(180, now + 16);
+    setTimeout(scheduleSweep, 16000);
+  }
+
+  // 4. Arpeggio melody — rising/falling epic notes
+  const arpOsc = audioCtx.createOscillator();
+  const arpGain = audioCtx.createGain();
+  const arpFilter = audioCtx.createBiquadFilter();
+  arpOsc.type = 'triangle';
+  arpFilter.type = 'bandpass'; arpFilter.frequency.value = 800; arpFilter.Q.value = 2;
+  arpGain.gain.value = 0;
+  arpOsc.connect(arpFilter); arpFilter.connect(arpGain); arpGain.connect(musicVolume);
+
+  const arpNotes = [110, 130.81, 146.83, 174.61, 196, 220, 261.63, 293.66, 329.63, 220, 196, 174.61];
+  let arpIdx = 0;
+  function scheduleArp() {
+    if (!musicPlaying) return;
+    const now = audioCtx.currentTime;
+    arpOsc.frequency.setValueAtTime(arpNotes[arpIdx % arpNotes.length], now);
+    arpGain.gain.cancelScheduledValues(now);
+    arpGain.gain.setValueAtTime(0.07, now);
+    arpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    arpIdx++;
+    const interval = arpIdx % 12 < 6 ? 380 : 520; // rhythmic variation
+    setTimeout(scheduleArp, interval);
+  }
+
+  // 5. Distant choir-like high oscillator
+  const choirOsc = audioCtx.createOscillator();
+  const choirGain = audioCtx.createGain();
+  const choirFilter = audioCtx.createBiquadFilter();
+  choirOsc.type = 'sine'; choirOsc.frequency.value = 288;
+  choirFilter.type = 'bandpass'; choirFilter.frequency.value = 600; choirFilter.Q.value = 3;
+  choirGain.gain.value = 0.04;
+  choirOsc.connect(choirFilter); choirFilter.connect(choirGain); choirGain.connect(musicVolume);
+
+  // Very slow choir vibrato
+  const choirLFO = audioCtx.createOscillator();
+  const choirLFOGain = audioCtx.createGain();
+  choirLFO.frequency.value = 0.15; choirLFOGain.gain.value = 4;
+  choirLFO.connect(choirLFOGain); choirLFOGain.connect(choirOsc.frequency);
+
+  // Start all oscillators
+  bassOsc.start(); padOsc1.start(); padOsc2.start();
+  sweepOsc.start(); arpOsc.start(); choirOsc.start(); choirLFO.start();
+
+  musicNodes = { bassGain, padGain, sweepGain, arpGain, choirGain };
+
+  // Kick off schedulers
+  setTimeout(() => { scheduleBassThump(); scheduleSweep(); scheduleArp(); }, 100);
+}
+
+function startSpaceMusic() {
+  initAudio();
+  if (musicPlaying) return;
+  musicPlaying = true;
+  const now = audioCtx.currentTime;
+  musicVolume.gain.cancelScheduledValues(now);
+  musicVolume.gain.setValueAtTime(musicVolume.gain.value, now);
+  musicVolume.gain.linearRampToValueAtTime(0.9, now + 4); // fade in over 4s
+}
+
+function stopSpaceMusic() {
+  if (!audioCtx || !musicPlaying) return;
+  musicPlaying = false;
+  const now = audioCtx.currentTime;
+  musicVolume.gain.cancelScheduledValues(now);
+  musicVolume.gain.setValueAtTime(musicVolume.gain.value, now);
+  musicVolume.gain.linearRampToValueAtTime(0, now + 3); // fade out over 3s
+}
+
+// ── LASER PACHOO SOUND ────────────────────────────────────────────────────────
+function playLaserSound() {
+  initAudio();
+  const now = audioCtx.currentTime;
+
+  // Main "pachoo" — descending pitch sweep
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const filter = audioCtx.createBiquadFilter();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(1200, now);
+  osc.frequency.exponentialRampToValueAtTime(120, now + 0.18);
+  filter.type = 'bandpass'; filter.frequency.value = 800; filter.Q.value = 3;
+  gain.gain.setValueAtTime(0.35, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+  osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(now); osc.stop(now + 0.22);
+
+  // Second harmonic layer — adds the "choo" tail
+  const osc2 = audioCtx.createOscillator();
+  const gain2 = audioCtx.createGain();
+  osc2.type = 'sine';
+  osc2.frequency.setValueAtTime(600, now + 0.04);
+  osc2.frequency.exponentialRampToValueAtTime(60, now + 0.25);
+  gain2.gain.setValueAtTime(0.0, now);
+  gain2.gain.setValueAtTime(0.2, now + 0.04);
+  gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+  osc2.connect(gain2); gain2.connect(audioCtx.destination);
+  osc2.start(now); osc2.stop(now + 0.3);
+
+  // Noise burst for the initial "pa" crack
+  const bufLen = audioCtx.sampleRate * 0.06;
+  const noiseBuf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+  const nd = noiseBuf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) nd[i] = (Math.random()*2-1) * (1 - i/bufLen);
+  const noiseSource = audioCtx.createBufferSource();
+  const noiseGain = audioCtx.createGain();
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseSource.buffer = noiseBuf;
+  noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 2000;
+  noiseGain.gain.value = 0.15;
+  noiseSource.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(audioCtx.destination);
+  noiseSource.start(now);
+}
+
+// ── EXPLOSION SOUND ───────────────────────────────────────────────────────────
+function playExplosionSound() {
+  initAudio();
+  const now = audioCtx.currentTime;
+  const bufLen = audioCtx.sampleRate * 0.9;
+  const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/bufLen, 1.2);
+  const src = audioCtx.createBufferSource();
+  const g = audioCtx.createGain();
+  const f = audioCtx.createBiquadFilter();
+  src.buffer = buf;
+  f.type = 'lowpass'; f.frequency.value = 400;
+  g.gain.setValueAtTime(0.5, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+  src.connect(f); f.connect(g); g.connect(audioCtx.destination);
+  src.start(now);
+}
+const expColors = [0xff6600, 0xff2200, 0xffcc00, 0xff4488, 0xffffff];
+
+function spawnExplosion(pos) {
+  const particles = [];
+  const count = 32;
+  for (let i = 0; i < count; i++) {
+    const size = 0.2 + Math.random() * 0.7;
+    const g = new THREE.SphereGeometry(size, 5, 5);
+    const col = expColors[Math.floor(Math.random() * expColors.length)];
+    const m = new THREE.MeshBasicMaterial({ color: col, transparent: true });
+    const p = new THREE.Mesh(g, m);
+    p.position.copy(pos);
+    const vel = new THREE.Vector3(
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18
+    );
+    scene.add(p);
+    particles.push({ mesh: p, vel, drag: 0.86 });
+  }
+  // No PointLight — removes shader uniform overflow risk
+  explosions.push({ particles, life: 1.4, maxLife: 1.4 });
+  playExplosionSound();
+}
+
+// ─── PROCEDURAL REMOTE CITIES ────────────────────────────────────────────────
+// Each city lives at a fixed world-space position (in the void, high up)
+// Cities are generated when player flies within range, and can be landed in.
+
+const remoteCities = new Map(); // key -> { wx, wy, wz, generated, group, landY, cityDef }
+const CITY_GEN_RANGE = 180;   // generate city geometry when within this range
+const CITY_LAND_RANGE = 30;   // auto-land when within this range and descending
+const VOID_Y = 0;              // cities sit at y=0 in world space
+
+// Predefined city "seeds" scattered across the void (fixed positions)
+const CITY_SEEDS = [
+  { key:'c1',  wx:  800, wz:  400 },
+  { key:'c2',  wx: -700, wz:  600 },
+  { key:'c3',  wx:  500, wz: -900 },
+  { key:'c4',  wx: -900, wz: -500 },
+  { key:'c5',  wx: 1200, wz: -300 },
+  { key:'c6',  wx: -400, wz: 1100 },
+  { key:'c7',  wx:  300, wz: 1400 },
+  { key:'c8',  wx:-1300, wz:  200 },
+];
+
+// City theme definitions — each has distinct colors and shapes
+const CITY_THEMES = [
+  { name:'CRIMSON REACH',  ground:0x1a0808, road:0x220a0a, bldg:[0x3d0000,0x5a1010,0x7a2020], win:[0xff6644,0xff4400,0xffaa00] },
+  { name:'VERDANT DEEP',   ground:0x081a08, road:0x0a1a0a, bldg:[0x003d10,0x105a20,0x207a30], win:[0x44ff88,0x00ffaa,0xaaff44] },
+  { name:'AZURE SPIRE',    ground:0x08101a, road:0x0a1422, bldg:[0x001040,0x102060,0x203080], win:[0x44aaff,0x00ccff,0x88ddff] },
+  { name:'VIOLET CROWN',   ground:0x110818, road:0x180a22, bldg:[0x2d0044,0x450066,0x600088], win:[0xcc44ff,0xff00ff,0xee88ff] },
+  { name:'GOLD CITADEL',   ground:0x1a1400, road:0x221a00, bldg:[0x3d3000,0x5a4800,0x7a6200], win:[0xffee00,0xffcc00,0xffffff] },
+  { name:'OBSIDIAN RISE',  ground:0x080808, road:0x111111, bldg:[0x111111,0x1a1a1a,0x222222], win:[0x00ffff,0xff00ff,0xffffff] },
+  { name:'CORAL DRIFT',    ground:0x1a0d08, road:0x221208, bldg:[0x5a2010,0x7a3520,0x3d1808], win:[0xff8844,0xffcc88,0xff4488] },
+  { name:'FROST HOLLOW',   ground:0x0e1420, road:0x141c2a, bldg:[0x1a2a3d,0x243850,0x2a4060], win:[0xaaddff,0xeef4ff,0x66ccff] },
+];
+
+let currentCityKey = 'home'; // which city player is in ('home' = origin)
+const cityNameEl = document.createElement('div');
+cityNameEl.id = 'city-name';
+cityNameEl.style.cssText = `position:absolute;top:90px;left:20px;color:rgba(255,200,50,0.7);
+  font-size:9px;letter-spacing:3px;text-transform:uppercase;pointer-events:none;`;
+cityNameEl.textContent = 'HOME CITY';
+document.getElementById('hud').appendChild(cityNameEl);
+
+function seededRand(seed) {
+  // Simple deterministic pseudo-random from a seed string
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(31, h) + seed.charCodeAt(i) | 0;
+  return () => { h ^= h << 13; h ^= h >> 17; h ^= h << 5; return (h >>> 0) / 0xffffffff; };
+}
+
+function generateRemoteCity(seed) {
+  if (remoteCities.has(seed.key)) {
+    const c = remoteCities.get(seed.key);
+    if (c.generated) return;
+    // Remove the placeholder marker
+    if (c.markerGroup) scene.remove(c.markerGroup);
+  }
+
+  const rand = seededRand(seed.key);
+  const theme = CITY_THEMES[Math.floor(rand() * CITY_THEMES.length)];
+  const ox = seed.wx, oz = seed.wz, oy = VOID_Y;
+  const group = new THREE.Group();
+  group.position.set(ox, oy, oz);
+
+  // Ground tiles
+  const gSize = 160;
+  const groundG = new THREE.PlaneGeometry(gSize, gSize);
+  const groundM = new THREE.MeshLambertMaterial({ color: theme.ground });
+  const ground = new THREE.Mesh(groundG, groundM);
+  ground.rotation.x = -Math.PI / 2;
+  group.add(ground);
+
+  // Road grid
+  for (let i = -5; i <= 5; i++) {
+    for (let j = -5; j <= 5; j++) {
+      const isRoadX = (i % 3 === 0), isRoadZ = (j % 3 === 0);
+      if (!isRoadX && !isRoadZ) continue;
+      const rg = new THREE.PlaneGeometry(8, 8);
+      const rm = new THREE.MeshLambertMaterial({ color: theme.road });
+      const rt = new THREE.Mesh(rg, rm);
+      rt.rotation.x = -Math.PI / 2;
+      rt.position.set(i*8, 0.01, j*8);
+      group.add(rt);
+    }
+  }
+
+  // Unique buildings using this city's theme
+  const cityCollBoxes = [];
+  for (let bx = -4; bx <= 4; bx++) {
+    for (let bz = -4; bz <= 4; bz++) {
+      if (bx % 3 === 0 || bz % 3 === 0) continue;
+      const cx = bx * 8, cz = bz * 8;
+      // Vary height dramatically by city theme
+      const hBase = theme.name === 'AZURE SPIRE' ? 15 : theme.name === 'OBSIDIAN RISE' ? 8 : 5;
+      const h = hBase + rand() * 30;
+      const w = 3 + rand() * 4, d = 3 + rand() * 4;
+      const col = theme.bldg[Math.floor(rand() * theme.bldg.length)];
+      const bg = new THREE.BoxGeometry(w, h, d);
+      const bm = new THREE.MeshLambertMaterial({ color: col });
+      const bb = new THREE.Mesh(bg, bm);
+      bb.position.set(cx, h/2, cz);
+      group.add(bb);
+
+      // Windows
+      for (let fl = 1; fl < h - 1; fl += 2.5) {
+        for (let side = -w/2 + 0.8; side < w/2; side += 1.8) {
+          if (rand() < 0.3) continue;
+          const wg2 = new THREE.PlaneGeometry(0.8, 1.2);
+          const wc = theme.win[Math.floor(rand() * theme.win.length)];
+          const wm2 = new THREE.MeshBasicMaterial({ color: rand() < 0.6 ? wc : 0x111122 });
+          const ww = new THREE.Mesh(wg2, wm2);
+          ww.position.set(side, fl + 0.8, d/2 + 0.01);
+          bb.add(ww);
+        }
+      }
+
+      cityCollBoxes.push({ minX: ox+cx-w/2, maxX: ox+cx+w/2, minZ: oz+cz-d/2, maxZ: oz+cz+d/2, maxY: h });
+    }
+  }
+
+  // Tall beacon pillar — visible from hundreds of units away in the void
+  const pillarG = new THREE.CylinderGeometry(0.5, 1.5, 80, 8);
+  const pillarM = new THREE.MeshBasicMaterial({ color: theme.win[0], transparent: true, opacity: 0.6 });
+  const pillar = new THREE.Mesh(pillarG, pillarM);
+  pillar.position.set(0, 40, 0);
+  group.add(pillar);
+
+  // Spinning beacon ring at top
+  const beaconG = new THREE.TorusGeometry(8, 0.5, 8, 32);
+  const beaconM = new THREE.MeshBasicMaterial({ color: theme.win[0] });
+  const beacon = new THREE.Mesh(beaconG, beaconM);
+  beacon.position.set(0, 82, 0);
+  group.add(beacon);
+
+  // Second smaller ring
+  const beacon2G = new THREE.TorusGeometry(4, 0.3, 6, 24);
+  const beacon2 = new THREE.Mesh(beacon2G, new THREE.MeshBasicMaterial({ color: theme.win[1] || theme.win[0] }));
+  beacon2.position.set(0, 78, 0);
+  beacon2.rotation.x = Math.PI / 3;
+  group.add(beacon2);
+
+  scene.add(group);
+
+  remoteCities.set(seed.key, {
+    wx: ox, wy: oy, wz: oz,
+    generated: true,
+    group,
+    theme,
+    cityCollBoxes,
+    beacon,
+    landTarget: new THREE.Vector3(ox, oy + 1.7, oz),
+  });
+}
+
+function updateRemoteCities(dt, t) {
+  const cp = camera.position;
+
+  for (const seed of CITY_SEEDS) {
+    const dx = cp.x - seed.wx, dz = cp.z - seed.wz;
+    const dist2D = Math.sqrt(dx*dx + dz*dz);
+
+    // Generate when close enough
+    if (dist2D < CITY_GEN_RANGE && flightMode) {
+      generateRemoteCity(seed);
+    }
+
+    // Animate beacons
+    if (remoteCities.has(seed.key)) {
+      const c = remoteCities.get(seed.key);
+      if (c.beacon) c.beacon.rotation.z += dt * 0.5;
+    }
+  }
+
+  // Check if player is landing in a remote city
+  if (!flightMode && !flyingHome) return;
+
+  for (const seed of CITY_SEEDS) {
+    if (!remoteCities.has(seed.key)) continue;
+    const c = remoteCities.get(seed.key);
+    const dx = cp.x - c.wx, dz = cp.z - c.wz;
+    const dist2D = Math.sqrt(dx*dx + dz*dz);
+
+    if (dist2D < CITY_LAND_RANGE && Math.abs(cp.y - c.wy) < 25 && flightTransition > 0.3) {
+      // Close to city — collapse flightTransition
+      flightTransition = Math.max(0, flightTransition - dt * 1.5);
+
+      if (flightTransition < 0.05 && flightMode) {
+        // Land!
+        flightMode = false;
+        flyingHome = false;
+        stopSpaceMusic();
+        camera.position.set(c.wx + (Math.random()-0.5)*20, c.wy + 1.7, c.wz + (Math.random()-0.5)*20);
+        pitch = 0;
+        currentCityKey = seed.key;
+        cityNameEl.textContent = c.theme.name;
+
+        // Register this city's collision boxes
+        c.cityCollBoxes.forEach(box => {
+          if (!collisionBoxes.includes(box)) collisionBoxes.push(box);
+        });
+
+        document.getElementById('fly-home-btn').style.display = 'none';
+        infoPanel.innerHTML = 'WASD / ARROWS — MOVE &nbsp;|&nbsp; CLICK + DRAG — LOOK &nbsp;|&nbsp; SHIFT — SPRINT &nbsp;|&nbsp; SPACE — HUG';
+
+        document.getElementById('flight-indicator').textContent = `✦ ARRIVED: ${c.theme.name} ✦`;
+        document.getElementById('flight-indicator').style.color = 'rgba(255,220,100,0.95)';
+        setTimeout(() => { document.getElementById('flight-indicator').style.color = 'rgba(255,220,100,0)'; }, 4000);
+
+        spaceships.forEach(s => scene.remove(s.mesh)); spaceships.length = 0;
+        lasers.forEach(l => scene.remove(l.mesh)); lasers.length = 0;
+        explosions.forEach(e => e.particles.forEach(p => scene.remove(p.mesh))); explosions.length = 0;
+      }
+    }
+  }
+}
+
+function findNearestCityTarget() {
+  let nearest = null, nearestDist = Infinity;
+  // Check home city (origin)
+  const homeDist = Math.sqrt(camera.position.x**2 + camera.position.z**2);
+  if (homeDist < nearestDist) { nearestDist = homeDist; nearest = { x: (Math.random()-0.5)*30, z: (Math.random()-0.5)*30 }; }
+  // Check all city seeds (beacon markers are always present)
+  for (const seed of CITY_SEEDS) {
+    const dx = camera.position.x - seed.wx, dz = camera.position.z - seed.wz;
+    const d = Math.sqrt(dx*dx + dz*dz);
+    if (d < nearestDist) { nearestDist = d; nearest = { x: seed.wx, z: seed.wz }; }
+  }
+  return nearest || { x: 0, z: 0 };
+}
+let flyingHome = false;
+let flyHomeTarget = new THREE.Vector3(0, 1.7, 0);
+
+function flyHome() {
+  if (!flightMode && !flyingHome) return;
+  flyingHome = true;
+  const t = findNearestCityTarget();
+  flyHomeTarget.set(
+    t.x + (Math.random() - 0.5) * 20,
+    VOID_Y + 1.7,
+    t.z + (Math.random() - 0.5) * 20
+  );
+  document.getElementById('flight-indicator').textContent = '⬡ NAVIGATING TO CITY ⬡';
+  document.getElementById('flight-indicator').style.color = 'rgba(100,255,180,0.9)';
+  setTimeout(() => { document.getElementById('flight-indicator').style.color = 'rgba(100,255,180,0)'; }, 3000);
+}
+
+function updateFlyHome(dt) {
+  if (!flyingHome) return;
+  const dir = flyHomeTarget.clone().sub(camera.position);
+  const dist = dir.length();
+
+  // Collapse flightTransition as we approach the target city
+  const distToTarget = new THREE.Vector2(camera.position.x - flyHomeTarget.x, camera.position.z - flyHomeTarget.z).length();
+  if (distToTarget < CITY_EDGE + 20) {
+    flightTransition = Math.max(0, Math.min(flightTransition, (distToTarget - 5) / CITY_EDGE));
+  }
+
+  if (dist < 4) {
+    flyingHome = false;
+    flightTransition = 0;
+    flightMode = false;
+    stopSpaceMusic();
+    camera.position.x = flyHomeTarget.x;
+    camera.position.z = flyHomeTarget.z;
+    camera.position.y = VOID_Y + 1.7;
+    pitch = 0;
+
+    // Update city name label
+    cityNameEl.textContent = getCurrentCityName();
+
+    document.getElementById('fly-home-btn').style.display = 'none';
+    infoPanel.innerHTML = 'WASD / ARROWS — MOVE &nbsp;|&nbsp; CLICK + DRAG — LOOK &nbsp;|&nbsp; SHIFT — SPRINT &nbsp;|&nbsp; SPACE — HUG';
+    return;
+  }
+
+  dir.normalize();
+  const flySpeed = Math.min(dist * 4, 100);
+  camera.position.addScaledVector(dir, flySpeed * dt);
+
+  const targetYaw = Math.atan2(-dir.x, -dir.z);
+  let dyaw = targetYaw - yaw;
+  while (dyaw >  Math.PI) dyaw -= Math.PI * 2;
+  while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+  yaw   += dyaw * Math.min(dt * 3, 1);
+  pitch += (0 - pitch) * Math.min(dt * 2, 1);
+}
+
+function getCurrentCityName() {
+  // Find which city the player is in
+  for (const seed of CITY_SEEDS) {
+    if (!remoteCities.has(seed.key)) continue;
+    const c = remoteCities.get(seed.key);
+    const dx = camera.position.x - c.wx, dz = camera.position.z - c.wz;
+    if (Math.sqrt(dx*dx + dz*dz) < CITY_EDGE) return c.theme.name;
+  }
+  const dx = camera.position.x, dz = camera.position.z;
+  if (Math.sqrt(dx*dx + dz*dz) < CITY_EDGE) return 'HOME CITY';
+  return '';
+}
+
+// ─── UPDATE SPACE OBJECTS ─────────────────────────────────────────────────────
+function updateSpaceObjects(dt) {
+  if (!flightMode && !flyingHome) {
+    // Clean up ships if not in flight mode
+    return;
+  }
+
+  // Spawn ships
+  shipSpawnTimer -= dt;
+  if (shipSpawnTimer <= 0 && flightMode) {
+    spawnShip();
+    shipSpawnTimer = SHIP_SPAWN_INTERVAL + Math.random() * 2;
+  }
+
+  // Update lasers
+  for (let i = lasers.length - 1; i >= 0; i--) {
+    const l = lasers[i];
+    l.life -= dt;
+    if (l.life <= 0) {
+      scene.remove(l.mesh);
+      lasers.splice(i, 1);
+      continue;
+    }
+    l.mesh.position.addScaledVector(l.dir, l.speed * dt);
+
+    // Check hit vs ships
+    for (let j = spaceships.length - 1; j >= 0; j--) {
+      const ship = spaceships[j];
+      if (!ship.alive) continue;
+      const dist = l.mesh.position.distanceTo(ship.mesh.position);
+      if (dist < ship.mesh.userData.radius) {
+        // HIT
+        ship.alive = false;
+        const hitPos = ship.mesh.position.clone();
+        spawnExplosion(hitPos);
+        scene.remove(ship.mesh);
+        spaceships.splice(j, 1);
+        scene.remove(l.mesh);
+        lasers.splice(i, 1);
+        killCount++;
+        // Project hit position to screen for popup
+        const sv = hitPos.clone().project(camera);
+        const sx = (sv.x * 0.5 + 0.5) * window.innerWidth;
+        const sy = (-sv.y * 0.5 + 0.5) * window.innerHeight;
+        addScore(10, sx, sy, '#ff6644');
+        break;
+      }
+    }
+  }
+
+  // Update ships
+  for (let i = spaceships.length - 1; i >= 0; i--) {
+    const ship = spaceships[i];
+    ship.life -= dt;
+    if (ship.life <= 0 || ship.mesh.position.distanceTo(camera.position) > 400) {
+      scene.remove(ship.mesh);
+      spaceships.splice(i, 1);
+      continue;
+    }
+    ship.mesh.position.addScaledVector(ship.flyDir, ship.speed * dt);
+    // Gentle roll
+    ship.mesh.rotateZ(0.008);
+  }
+
+  // Update explosions
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const exp = explosions[i];
+    exp.life -= dt;
+    if (exp.life <= 0) {
+      exp.particles.forEach(p => scene.remove(p.mesh));
+      explosions.splice(i, 1);
+      continue;
+    }
+    const t = exp.life / exp.maxLife;
+    exp.particles.forEach(p => {
+      p.vel.multiplyScalar(p.drag);
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.mesh.material.opacity = t;
+      p.mesh.scale.setScalar(0.4 + t * 0.9);
+    });
+  }
+
+  // Laser cooldown
+  if (laserCooldown > 0) laserCooldown -= dt;
+}
+const clock = new THREE.Clock();
+
+// Stair volumes for collision/climbing
+const stairZones = [
+  { x: -16, z: -8, dir: 0 },
+  { x: 16,  z: 8,  dir: Math.PI },
+  { x: -8,  z: 16, dir: Math.PI/2 },
+  { x: 8,   z: -16,dir: -Math.PI/2 }
+];
+
+function getStairY(x, z) {
+  for (const sz of stairZones) {
+    const dx = x - sz.x, dz = z - sz.z;
+    const cosD = Math.cos(-sz.dir), sinD = Math.sin(-sz.dir);
+    const lx = dx * cosD - dz * sinD;
+    const lz = dx * sinD + dz * cosD;
+    if (lx > -2 && lx < 2 && lz > 0 && lz < 6.4) {
+      const step = Math.floor(lz / 0.8);
+      return step * 0.3;
+    }
+  }
+  return null;
+}
+
+function updatePlayer(dt) {
+  // When auto-flying home, updateFlyHome handles position — skip manual input
+  if (flyingHome) {
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+    camera.rotation.z = 0;
+    return;
+  }
+
+  // Walk: 8, Sprint: 16. Flight boost: 40.
+  const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? (flightMode ? 80 : 16) : (flightMode ? 36 : 8);
+
+  if (flightMode) {
+    // Free 3D flight — move along actual camera look direction
+    const flyDir = new THREE.Vector3();
+    camera.getWorldDirection(flyDir);
+    const right3D = new THREE.Vector3();
+    right3D.crossVectors(flyDir, camera.up).normalize();
+
+    if (keys['KeyW'] || keys['ArrowUp'])    camera.position.addScaledVector(flyDir,   speed * dt);
+    if (keys['KeyS'] || keys['ArrowDown'])  camera.position.addScaledVector(flyDir,  -speed * dt);
+    if (keys['KeyA'] || keys['ArrowLeft'])  camera.position.addScaledVector(right3D, -speed * dt);
+    if (keys['KeyD'] || keys['ArrowRight']) camera.position.addScaledVector(right3D,  speed * dt);
+
+    // Pitch is fully free in space
+    pitch = Math.max(-Math.PI * 0.9, Math.min(Math.PI * 0.9, pitch));
+  } else {
+    // Ground movement — horizontal only
+    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const right   = new THREE.Vector3( Math.cos(yaw), 0, -Math.sin(yaw));
+
+    const playerDir = new THREE.Vector3();
+    if (keys['KeyW'] || keys['ArrowUp'])    playerDir.addScaledVector(forward,  1);
+    if (keys['KeyS'] || keys['ArrowDown'])  playerDir.addScaledVector(forward, -1);
+    if (keys['KeyA'] || keys['ArrowLeft'])  playerDir.addScaledVector(right,   -1);
+    if (keys['KeyD'] || keys['ArrowRight']) playerDir.addScaledVector(right,    1);
+    if (playerDir.lengthSq() > 0) playerDir.normalize();
+
+    const nextPos = camera.position.clone().addScaledVector(playerDir, speed * dt);
+
+    // Collision resolution — try X and Z separately for sliding
+    const testX = new THREE.Vector3(nextPos.x, camera.position.y, camera.position.z);
+    resolveCollision(testX, camera.position);
+    const testZ = new THREE.Vector3(testX.x, camera.position.y, nextPos.z);
+    resolveCollision(testZ, testX);
+    camera.position.x = testZ.x;
+    camera.position.z = testZ.z;
+
+    // ALWAYS snap to ground — works for home city and remote cities (all at VOID_Y)
+    const stairY = getStairY(camera.position.x, camera.position.z);
+    const groundY = (stairY !== null ? stairY : VOID_Y) + 1.7;
+    camera.position.y = groundY; // hard snap, no lerp drift
+
+    pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, pitch));
+  }
+
+  // Camera rotation - YXZ order is critical for FPS look
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+  camera.rotation.z = 0;
+
+  // Update compass
+  const needle = document.getElementById('compass-needle');
+  if (needle) needle.style.transform = `translateX(-50%) rotate(${yaw}rad)`;
+}
+
+// ─── ENTITY AI ───────────────────────────────────────────────────────────────
+function updateEntities(t, dt) {
+  entities.forEach(ent => {
+    // Tick hug freeze
+    if (ent.hugFrozen > 0) {
+      ent.hugFrozen -= dt;
+      // Walk animation paused while hugging
+      if (ent.type === 'explorer') {
+        if (ent.legL) ent.legL.rotation.x = 0;
+        if (ent.legR) ent.legR.rotation.x = 0;
+      }
+      // Keep spawning hearts while frozen
+      if (Math.random() < 0.04) {
+        spawnHearts(ent.mesh.position.x, ent.mesh.position.y + 2.5, ent.mesh.position.z, 2);
+      }
+      return; // skip normal AI while frozen
+    }
+
+    const wp = ent.waypoints[ent.wpIdx];
+    const dx = wp.x - ent.mesh.position.x;
+    const dz = wp.z - ent.mesh.position.z;
+    const dist = Math.sqrt(dx*dx + dz*dz);
+
+    if (dist < 1.5) {
+      ent.wpIdx = (ent.wpIdx + 1) % ent.waypoints.length;
+    } else {
+      ent.mesh.position.x += (dx/dist) * ent.speed * 60 * dt;
+      ent.mesh.position.z += (dz/dist) * ent.speed * 60 * dt;
+      ent.mesh.rotation.y = Math.atan2(dx, dz);
+    }
+
+    if (ent.type === 'wraith') {
+      ent.mesh.position.y = 3 + Math.sin(t * 1.2 + ent.floatOffset) * 0.8;
+      ent.mesh.rotation.y += 0.01;
+    }
+    if (ent.type === 'golem') {
+      ent.head.rotation.y += 0.02;
+    }
+    if (ent.type === 'stalker') {
+      ent.mesh.position.y = 0.1 + Math.abs(Math.sin(t * 3)) * 0.2;
+    }
+
+    // Walk animation for explorers
+    if (ent.type === 'explorer') {
+      ent.walkTimer = (ent.walkTimer || 0) + dt * 4;
+      if (ent.legL) ent.legL.rotation.x = Math.sin(ent.walkTimer) * 0.3;
+      if (ent.legR) ent.legR.rotation.x = -Math.sin(ent.walkTimer) * 0.3;
+    }
+
+    // Encounter detection
+    const pdx = camera.position.x - ent.mesh.position.x;
+    const pdz = camera.position.z - ent.mesh.position.z;
+    const pdist = Math.sqrt(pdx*pdx + pdz*pdz);
+    if (pdist < 6) triggerEncounter(ent);
+  });
+}
+
+// ─── PORTAL ANIMATION ────────────────────────────────────────────────────────
+function updatePortals(t) {
+  portals.forEach((p, i) => {
+    p.rotation.y += 0.01;
+    p.rotation.z = Math.sin(t + i) * 0.1;
+    p.position.y = 2.5 + Math.sin(t * 0.8 + i) * 0.5;
+  });
+}
+
+// ─── COLLISION SYSTEM ────────────────────────────────────────────────────────
+function resolveCollision(newPos, oldPos) {
+  const r = PLAYER_RADIUS;
+  let px = newPos.x, pz = newPos.z;
+  const py = newPos.y - 1.7; // feet level
+
+  for (const box of collisionBoxes) {
+    // Only collide with boxes whose height reaches player feet
+    if (py > box.maxY) continue;
+    const inside = px > box.minX - r && px < box.maxX + r &&
+                   pz > box.minZ - r && pz < box.maxZ + r;
+    if (!inside) continue;
+
+    // Push out along the axis of least penetration
+    const overlapLeft  = (box.maxX + r) - px;
+    const overlapRight = px - (box.minX - r);
+    const overlapFront = (box.maxZ + r) - pz;
+    const overlapBack  = pz - (box.minZ - r);
+
+    const minOverlap = Math.min(overlapLeft, overlapRight, overlapFront, overlapBack);
+
+    if (minOverlap === overlapLeft)  { px = box.maxX + r; }
+    else if (minOverlap === overlapRight) { px = box.minX - r; }
+    else if (minOverlap === overlapFront) { pz = box.maxZ + r; }
+    else                              { pz = box.minZ - r; }
+  }
+  newPos.x = px;
+  newPos.z = pz;
+}
+
+// ─── FLIGHT MODE & SPACE ─────────────────────────────────────────────────────
+const CITY_EDGE = 85; // world boundary — beyond this, flight begins
+const FLIGHT_TRANSITION_DIST = 10; // fade zone
+let flightMode = false;
+let flightTransition = 0; // 0=city, 1=space
+let flightPitch = 0; // free 3D pitch in space
+
+// Space star chunks — procedurally generated as player moves
+const spaceChunks = new Map();
+const CHUNK_SIZE = 200;
+const STARS_PER_CHUNK = 800;
+const GALAXIES_PER_CHUNK = 1;
+
+function chunkKey(cx, cy, cz) { return `${cx},${cy},${cz}`; }
+
+function createStarChunk(cx, cy, cz) {
+  const key = chunkKey(cx, cy, cz);
+  if (spaceChunks.has(key)) return;
+
+  const ox = cx * CHUNK_SIZE, oy = cy * CHUNK_SIZE, oz = cz * CHUNK_SIZE;
+
+  // Stars
+  const positions = [];
+  const colors = [];
+  const starColorPalette = [
+    [1.0, 1.0, 1.0], [0.7, 0.85, 1.0], [1.0, 0.9, 0.7],
+    [1.0, 0.6, 0.4], [0.6, 0.7, 1.0], [1.0, 1.0, 0.6],
+  ];
+  for (let i = 0; i < STARS_PER_CHUNK; i++) {
+    positions.push(
+      ox + (Math.random() - 0.5) * CHUNK_SIZE,
+      oy + (Math.random() - 0.5) * CHUNK_SIZE,
+      oz + (Math.random() - 0.5) * CHUNK_SIZE
+    );
+    const c = starColorPalette[Math.floor(Math.random() * starColorPalette.length)];
+    colors.push(c[0], c[1], c[2]);
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  sg.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const sm = new THREE.PointsMaterial({ size: 0.4, vertexColors: true, transparent: true, opacity: 0 });
+  const stars = new THREE.Points(sg, sm);
+  scene.add(stars);
+
+  // Galaxies — spiral disc shapes
+  const galaxyObjects = [];
+  for (let g = 0; g < GALAXIES_PER_CHUNK; g++) {
+    const gx = ox + (Math.random() - 0.5) * CHUNK_SIZE;
+    const gy = oy + (Math.random() - 0.5) * CHUNK_SIZE;
+    const gz = oz + (Math.random() - 0.5) * CHUNK_SIZE;
+    const gGroup = new THREE.Group();
+    gGroup.position.set(gx, gy, gz);
+    gGroup.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+
+    const armCount = 2 + Math.floor(Math.random() * 3);
+    const galRadius = 15 + Math.random() * 30;
+    const galStars = 400 + Math.floor(Math.random() * 400);
+    const galPositions = [];
+    const galColors = [];
+    const hue = Math.random();
+    for (let s = 0; s < galStars; s++) {
+      const arm = Math.floor(Math.random() * armCount);
+      const t = Math.random();
+      const angle = (arm / armCount) * Math.PI * 2 + t * Math.PI * 4;
+      const r = t * galRadius + (Math.random() - 0.5) * galRadius * 0.3;
+      const spread = (1 - t) * 2 + 0.2;
+      galPositions.push(
+        Math.cos(angle) * r + (Math.random()-0.5) * spread,
+        (Math.random() - 0.5) * spread * 2,
+        Math.sin(angle) * r + (Math.random()-0.5) * spread
+      );
+      // Color: core is white/yellow, arms shift to blue/purple
+      const brightness = 0.6 + Math.random() * 0.4;
+      if (t < 0.3) {
+        galColors.push(brightness, brightness * 0.95, brightness * 0.7);
+      } else {
+        galColors.push(0.4 * brightness + hue * 0.3, 0.3 * brightness, brightness * (0.8 + hue * 0.2));
+      }
+    }
+    const gg = new THREE.BufferGeometry();
+    gg.setAttribute('position', new THREE.Float32BufferAttribute(galPositions, 3));
+    gg.setAttribute('color', new THREE.Float32BufferAttribute(galColors, 3));
+    const gm = new THREE.PointsMaterial({ size: 0.25, vertexColors: true, transparent: true, opacity: 0 });
+    const galaxy = new THREE.Points(gg, gm);
+    gGroup.add(galaxy);
+
+    // Glowing core — MeshBasicMaterial only, no PointLight
+    const coreG = new THREE.SphereGeometry(1.5, 8, 8);
+    const coreM = new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(hue, 0.5, 0.8), transparent: true, opacity: 0 });
+    const core = new THREE.Mesh(coreG, coreM);
+    gGroup.add(core);
+
+    scene.add(gGroup);
+    galaxyObjects.push({ group: gGroup, galaxy, core, coreM, gm, rotSpeed: (Math.random()-0.5)*0.001 });
+  }
+
+  spaceChunks.set(key, { stars, sm, galaxyObjects, opacity: 0 });
+}
+
+// Seed some initial chunks around origin-of-space
+function seedSpaceChunks(pos) {
+  const cx = Math.round(pos.x / CHUNK_SIZE);
+  const cy = Math.round(pos.y / CHUNK_SIZE);
+  const cz = Math.round(pos.z / CHUNK_SIZE);
+  for (let dx = -1; dx <= 1; dx++)
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dz = -1; dz <= 1; dz++)
+        createStarChunk(cx+dx, cy+dy, cz+dz);
+}
+
+// City stars (static, always visible faintly)
+const cityStarPos = [];
+for (let i = 0; i < 3000; i++) {
+  cityStarPos.push((Math.random()-0.5)*800, 40 + Math.random()*100, (Math.random()-0.5)*800);
+}
+const cityStarG = new THREE.BufferGeometry();
+cityStarG.setAttribute('position', new THREE.Float32BufferAttribute(cityStarPos, 3));
+const cityStarM = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2, transparent: true, opacity: 0.6 });
+scene.add(new THREE.Points(cityStarG, cityStarM));
+
+// HUD flight mode message
+const infoPanel = document.getElementById('info-panel');
+
+// Place lightweight beacon markers for all remote cities so they're visible from afar
+CITY_SEEDS.forEach(seed => placeCityBeaconMarker(seed));
+
+// ─── RENDER LOOP ─────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t  = clock.getElapsedTime();
+
+  updatePlayer(dt);
+  updateEntities(t, dt);
+  updatePortals(t);
+  updateSpaceObjects(dt);
+  updateFlyHome(dt);
+  updateRemoteCities(dt, t);
+
+  // Flight transition — beyond home city edge AND not near any remote city
+  const px = camera.position.x, pz = camera.position.z;
+  const distFromHome = Math.max(Math.abs(px), Math.abs(pz));
+
+  // Check if near any known remote city
+  let nearRemoteCity = false;
+  for (const seed of CITY_SEEDS) {
+    const dx = px - seed.wx, dz = pz - seed.wz;
+    if (Math.sqrt(dx*dx + dz*dz) < CITY_EDGE) { nearRemoteCity = true; break; }
+  }
+  const beyondEdge = distFromHome > CITY_EDGE && !nearRemoteCity;
+
+  if (!flyingHome) {
+    if (beyondEdge) {
+      flightTransition = Math.min(1, flightTransition + dt * 0.8);
+    } else {
+      flightTransition = Math.max(0, flightTransition - dt * 1.5);
+    }
+  }
+  // updateFlyHome manages flightTransition itself when flyingHome is true
+
+  if (flightTransition > 0.5 && !flightMode && !flyingHome) {
+    flightMode = true;
+    startSpaceMusic();
+    updateActionBtn();
+    infoPanel.innerHTML = 'WASD — FLY &nbsp;|&nbsp; DRAG — LOOK &nbsp;|&nbsp; SHIFT — BOOST &nbsp;|&nbsp; SPACE — SHOOT';
+    document.getElementById('flight-indicator').style.color = 'rgba(100,200,255,0.9)';
+    document.getElementById('flight-indicator').style.opacity = '1';
+    document.getElementById('fly-home-btn').style.display = 'block';
+    killScoreEl.textContent = `SHIPS DESTROYED: ${killCount}`;
+    setTimeout(() => { document.getElementById('flight-indicator').style.color = 'rgba(100,200,255,0)'; }, 3000);
+  } else if (flightTransition < 0.05 && flightMode && !flyingHome) {
+    flightMode = false;
+    stopSpaceMusic();
+    updateActionBtn();
+    infoPanel.innerHTML = 'WASD / ARROWS — MOVE &nbsp;|&nbsp; CLICK + DRAG — LOOK &nbsp;|&nbsp; SHIFT — SPRINT &nbsp;|&nbsp; SPACE — HUG';
+    document.getElementById('flight-indicator').textContent = '✦ RETURNING TO EARTH ✦';
+    document.getElementById('flight-indicator').style.color = 'rgba(255,200,100,0.9)';
+    document.getElementById('fly-home-btn').style.display = 'none';
+    // Clean up any remaining space objects
+    spaceships.forEach(s => scene.remove(s.mesh)); spaceships.length = 0;
+    lasers.forEach(l => scene.remove(l.mesh)); lasers.length = 0;
+    explosions.forEach(e => { e.particles.forEach(p => scene.remove(p.mesh)); }); explosions.length = 0;
+    setTimeout(() => {
+      document.getElementById('flight-indicator').style.color = 'rgba(255,200,100,0)';
+      document.getElementById('flight-indicator').textContent = '✦ ENTERING THE VOID ✦';
+    }, 3000);
+  }
+
+  // Update fog & sky — clamp properly so city is NEVER transparent
+  const ft = Math.max(0, Math.min(1, flightTransition));
+  const fogDensity = 0.025 * (1 - ft * 0.95);
+  scene.fog.density = fogDensity;
+  const skyR = (0x0a * (1 - ft)) / 255;
+  const skyG = (0x0a * (1 - ft)) / 255;
+  const skyB = (0x18 * (1 - ft) + 0x02 * ft) / 255;
+  scene.background.setRGB(Math.max(0, skyR), Math.max(0, skyG), Math.max(0, skyB));
+
+  // Space chunks — only show/update when ft > 0
+  if (ft > 0) {
+    seedSpaceChunks(camera.position);
+    spaceChunks.forEach((chunk) => {
+      chunk.opacity += (ft - chunk.opacity) * 0.05;
+      chunk.sm.opacity = chunk.opacity;
+      chunk.galaxyObjects.forEach(go => {
+        go.gm.opacity = chunk.opacity;
+        go.coreM.opacity = chunk.opacity * 0.6;
+        go.group.rotation.y += go.rotSpeed;
+      });
+    });
+  } else {
+    // Ensure all space chunks are invisible when fully in city
+    spaceChunks.forEach((chunk) => {
+      chunk.opacity = 0;
+      chunk.sm.opacity = 0;
+      chunk.galaxyObjects.forEach(go => {
+        go.gm.opacity = 0;
+        go.coreM.opacity = 0;
+      });
+    });
+  }
+
+  // City stars — always visible in city, fade out in space
+  cityStarM.opacity = 0.6 * (1 - ft * 0.8);
+
+  // Encounter fade out
+  if (encounterTimer > 0) {
+    encounterTimer -= dt;
+    if (encounterTimer <= 0) encounterEl.style.opacity = '0';
+  }
+  if (hugCooldown > 0) hugCooldown -= dt;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+</script>
+</body>
+</html>
