@@ -172,6 +172,23 @@
   }
   @keyframes laserPulse { 0% { opacity:1; } 100% { opacity:0; } }
 
+  /* ── WORMHOLE ────────────────────────────────────────────────── */
+  #wormhole-overlay {
+    position: fixed; inset: 0; z-index: 500;
+    background: #000008; pointer-events: none;
+    opacity: 0; transition: opacity 0.5s;
+  }
+  #wormhole-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+  }
+  #wormhole-msg {
+    position: absolute; top: 42%; left: 50%; transform: translateX(-50%);
+    color: rgba(0,220,255,0.92); font-size: 13px; letter-spacing: 4px;
+    text-shadow: 0 0 20px rgba(0,200,255,0.8), 0 0 40px rgba(0,200,255,0.4);
+    opacity: 0; transition: opacity 0.4s; pointer-events: none;
+    white-space: nowrap; font-style: italic;
+  }
+
   /* ── MOBILE CONTROLS ─────────────────────────────────────────── */
   #mobile-controls {
     display: none;
@@ -284,6 +301,8 @@
     <div class="score-breakdown" id="score-breakdown">⚔ 0 ships &nbsp;|&nbsp; ♥ 0 hugs</div>
   </div>
   <div id="kill-score"></div>
+  <div id="wormhole-overlay"><canvas id="wormhole-canvas"></canvas></div>
+  <div id="wormhole-msg" aria-live="polite">⊕ PRESS SPACE — ENTER WORMHOLE ⊕</div>
 </div>
 
 <!-- Mobile on-screen controls -->
@@ -387,14 +406,16 @@ sprintBtn.addEventListener('touchstart', e => {
   sprintBtn.classList.toggle('active', mobileBoost);
 }, { passive: false });
 
-// Action button (hug / shoot)
+// Action button (hug / shoot / wormhole)
 actionBtn.addEventListener('touchstart', e => {
   e.preventDefault();
   if (flightMode) shootLaser();
+  else if (wormholeNear) enterWormhole();
   else tryHug();
 }, { passive: false });
 actionBtn.addEventListener('click', () => {
   if (flightMode) shootLaser();
+  else if (wormholeNear) enterWormhole();
   else tryHug();
 });
 
@@ -663,6 +684,41 @@ addPortal(-32, -32);
 addPortal(32, 32);
 addPortal(-32, 32);
 addPortal(32, -32);
+
+// ─── WORMHOLES ────────────────────────────────────────────────────────────────
+const wormholes = [];
+const WORMHOLE_RANGE = 3.5;
+let wormholeActive = false;
+let wormholeNear = false;
+
+function addWormhole(x, z) {
+  const group = new THREE.Group();
+  // Outer ring — cyan glow
+  const outerG = new THREE.TorusGeometry(2.2, 0.12, 16, 80);
+  const outerRing = new THREE.Mesh(outerG, new THREE.MeshBasicMaterial({ color: 0x00ccff }));
+  group.add(outerRing);
+  // Middle ring — white, tilted at 45°
+  const midG = new THREE.TorusGeometry(1.65, 0.08, 12, 60);
+  const midRing = new THREE.Mesh(midG, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  midRing.rotation.x = Math.PI / 4;
+  group.add(midRing);
+  // Inner void face — dark transparent disc
+  const innerG = new THREE.CircleGeometry(2.05, 48);
+  const inner = new THREE.Mesh(innerG, new THREE.MeshBasicMaterial({
+    color: 0x000814, transparent: true, opacity: 0.93, side: THREE.DoubleSide
+  }));
+  group.add(inner);
+  // Innermost spinning ring — electric cyan, spins opposite
+  const spinG = new THREE.TorusGeometry(1.0, 0.06, 10, 48);
+  const spinRing = new THREE.Mesh(spinG, new THREE.MeshBasicMaterial({ color: 0x44ffff }));
+  group.add(spinRing);
+  group.position.set(x, 2.5, z);
+  group.userData = { midRing, spinRing };
+  scene.add(group);
+  wormholes.push(group);
+}
+addWormhole(0, -20);
+addWormhole(0,  20);
 
 // ─── ENTITIES (NPCs + CREATURES) ─────────────────────────────────────────────
 const entities = [];
@@ -946,11 +1002,12 @@ function tryHug() {
   addScore(5, window.innerWidth / 2, window.innerHeight * 0.42, '#ff88bb');
 }
 
-// Spacebar: hug in city, shoot laser in space
+// Spacebar: hug in city, shoot laser in space, enter wormhole when near one
 document.addEventListener('keydown', e => {
   if (e.code === 'Space') {
     e.preventDefault();
     if (flightMode) shootLaser();
+    else if (wormholeNear) enterWormhole();
     else tryHug();
   }
 });
@@ -1884,6 +1941,193 @@ function updatePortals(t) {
   });
 }
 
+// ─── WORMHOLE ANIMATION & INTERACTION ────────────────────────────────────────
+function updateWormholes(t) {
+  const whMsgEl = document.getElementById('wormhole-msg');
+  let nearAny = false;
+  wormholes.forEach((w, i) => {
+    w.rotation.y += 0.009;
+    w.userData.midRing.rotation.y = t * 0.75 + i * 1.2;
+    w.userData.spinRing.rotation.z = -t * 1.5 + i;
+    w.position.y = 2.5 + Math.sin(t * 0.6 + i * 1.5) * 0.35;
+    w.scale.setScalar(1 + Math.sin(t * 2.5 + i) * 0.05);
+    if (!flightMode && !wormholeActive) {
+      const dx = camera.position.x - w.position.x;
+      const dz = camera.position.z - w.position.z;
+      if (Math.sqrt(dx * dx + dz * dz) < WORMHOLE_RANGE) nearAny = true;
+    }
+  });
+  wormholeNear = nearAny;
+  if (whMsgEl) whMsgEl.style.opacity = (nearAny && !wormholeActive) ? '1' : '0';
+}
+
+function playWarpSound() {
+  if (!audioCtx) initAudio();
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  // Rising whoosh sweep
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(80, now);
+  osc.frequency.exponentialRampToValueAtTime(3200, now + 2.8);
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.35, now + 0.3);
+  gain.gain.linearRampToValueAtTime(0.5, now + 1.8);
+  gain.gain.linearRampToValueAtTime(0, now + 3.2);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(now); osc.stop(now + 3.2);
+  // Sub-bass rumble
+  const osc2 = audioCtx.createOscillator();
+  const gain2 = audioCtx.createGain();
+  osc2.type = 'sine';
+  osc2.frequency.setValueAtTime(40, now);
+  osc2.frequency.exponentialRampToValueAtTime(160, now + 3);
+  gain2.gain.setValueAtTime(0.4, now);
+  gain2.gain.linearRampToValueAtTime(0, now + 3);
+  osc2.connect(gain2); gain2.connect(audioCtx.destination);
+  osc2.start(now); osc2.stop(now + 3);
+  // Shimmer chimes at intervals
+  [0.5, 1.0, 1.5].forEach((delay, k) => {
+    const sh = audioCtx.createOscillator();
+    const sg = audioCtx.createGain();
+    sh.type = 'sine';
+    sh.frequency.value = 800 + k * 400;
+    sg.gain.setValueAtTime(0, now + delay);
+    sg.gain.linearRampToValueAtTime(0.07, now + delay + 0.2);
+    sg.gain.linearRampToValueAtTime(0, now + delay + 0.6);
+    sh.connect(sg); sg.connect(audioCtx.destination);
+    sh.start(now + delay); sh.stop(now + delay + 0.7);
+  });
+}
+
+let wormholeCanvasFrame = null;
+
+function enterWormhole() {
+  if (wormholeActive || flightMode) return;
+  wormholeActive = true;
+  playWarpSound();
+  // Pick a random destination — exclude the city the player is currently in
+  const available = CITY_SEEDS.filter(s => s.key !== currentCityKey);
+  const destSeed = available[Math.floor(Math.random() * available.length)];
+  // Pre-generate so the city name is ready during the animation
+  generateRemoteCity(destSeed);
+  const overlay = document.getElementById('wormhole-overlay');
+  const whCanvas = document.getElementById('wormhole-canvas');
+  whCanvas.width = window.innerWidth;
+  whCanvas.height = window.innerHeight;
+  const ctx2d = whCanvas.getContext('2d');
+  overlay.style.transition = 'opacity 0.4s';
+  overlay.style.opacity = '1';
+  document.getElementById('wormhole-msg').style.opacity = '0';
+  const startTime = performance.now();
+  const TRAVEL_DURATION = 3000;
+
+  function animateTunnel(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / TRAVEL_DURATION, 1);
+    const w = whCanvas.width, h = whCanvas.height;
+    const cx = w / 2, cy = h / 2;
+    const maxR = Math.sqrt(cx * cx + cy * cy) * 1.5;
+
+    ctx2d.fillStyle = '#000008';
+    ctx2d.fillRect(0, 0, w, h);
+
+    // Tunnel rings zooming outward from centre
+    const ringCount = 14;
+    const speed = 0.6 + progress * 2.2;
+    const timeOff = elapsed * 0.001 * speed;
+    for (let i = 0; i < ringCount; i++) {
+      const t = ((i / ringCount) + timeOff) % 1;
+      const r = t * maxR;
+      const alpha = (1 - t) * 0.75;
+      const hue = ((t * 180 + elapsed * 0.06) % 360);
+      ctx2d.strokeStyle = `hsla(${hue + 160}, 100%, 70%, ${alpha})`;
+      ctx2d.lineWidth = 1.5 + (1 - t) * 3;
+      ctx2d.beginPath();
+      ctx2d.ellipse(cx, cy, r * 0.55, r, 0, 0, Math.PI * 2);
+      ctx2d.stroke();
+    }
+
+    // Light-speed star streaks
+    for (let i = 0; i < 55; i++) {
+      const angle = (i / 55) * Math.PI * 2 + elapsed * 0.0004;
+      const t2 = ((i * 0.618 + elapsed * 0.001 * (0.5 + progress * 1.5)) % 1);
+      const r1 = t2 * maxR * 0.85;
+      const r2 = r1 + (15 + progress * 90) * (1 - t2 * 0.4);
+      const alpha2 = (1 - t2) * 0.85;
+      ctx2d.strokeStyle = `rgba(180, 240, 255, ${alpha2})`;
+      ctx2d.lineWidth = 0.5 + (1 - t2) * 1.8;
+      ctx2d.beginPath();
+      ctx2d.moveTo(cx + Math.cos(angle) * r1 * 0.55, cy + Math.sin(angle) * r1);
+      ctx2d.lineTo(cx + Math.cos(angle) * r2 * 0.55, cy + Math.sin(angle) * r2);
+      ctx2d.stroke();
+    }
+
+    // Central vortex glow
+    const vortexR = Math.min(maxR * 0.18, 180) * (0.5 + 0.5 * (1 - progress));
+    const vg = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, vortexR);
+    vg.addColorStop(0, `rgba(0, 230, 255, ${0.7 + Math.sin(elapsed * 0.012) * 0.15})`);
+    vg.addColorStop(0.5, 'rgba(0, 80, 200, 0.35)');
+    vg.addColorStop(1, 'rgba(0,0,20,0)');
+    ctx2d.fillStyle = vg;
+    ctx2d.beginPath();
+    ctx2d.arc(cx, cy, vortexR, 0, Math.PI * 2);
+    ctx2d.fill();
+
+    // Destination name fades in near end of transit
+    if (progress > 0.65) {
+      const fa = Math.min((progress - 0.65) / 0.2, 1);
+      const destName = remoteCities.has(destSeed.key) ? remoteCities.get(destSeed.key).theme.name : '...';
+      const fontSize = Math.max(12, Math.round(w * 0.012 + 8));
+      ctx2d.save();
+      ctx2d.fillStyle = `rgba(255,255,255,${fa})`;
+      ctx2d.font = `${fontSize}px "Courier New", monospace`;
+      ctx2d.textAlign = 'center';
+      ctx2d.shadowColor = 'rgba(0,220,255,0.9)';
+      ctx2d.shadowBlur = 20;
+      ctx2d.fillText('ARRIVING: ' + destName, cx, cy + Math.round(h * 0.07));
+      ctx2d.restore();
+    }
+
+    if (progress < 1) {
+      wormholeCanvasFrame = requestAnimationFrame(animateTunnel);
+    } else {
+      completeWormholeTravel(destSeed, overlay);
+    }
+  }
+  wormholeCanvasFrame = requestAnimationFrame(animateTunnel);
+}
+
+function completeWormholeTravel(destSeed, overlay) {
+  // City was already generated before the animation — just look it up
+  const c = remoteCities.get(destSeed.key);
+  camera.position.set(
+    c.wx + (Math.random() - 0.5) * 20,
+    c.wy + 1.7,
+    c.wz + (Math.random() - 0.5) * 20
+  );
+  pitch = 0;
+  currentCityKey = destSeed.key;
+  cityNameEl.textContent = c.theme.name;
+  if (c.cityCollBoxes) {
+    c.cityCollBoxes.forEach(box => {
+      if (!collisionBoxes.includes(box)) collisionBoxes.push(box);
+    });
+  }
+  overlay.style.transition = 'opacity 0.9s';
+  overlay.style.opacity = '0';
+  document.getElementById('flight-indicator').textContent = `⊕ ARRIVED VIA WORMHOLE: ${c.theme.name} ⊕`;
+  document.getElementById('flight-indicator').style.color = 'rgba(0,220,255,0.95)';
+  setTimeout(() => {
+    document.getElementById('flight-indicator').style.color = 'rgba(0,220,255,0)';
+  }, 4500);
+  setTimeout(() => {
+    wormholeActive = false;
+    overlay.style.transition = '';
+  }, 1200);
+}
+
 // ─── COLLISION SYSTEM ────────────────────────────────────────────────────────
 function resolveCollision(newPos, oldPos) {
   const r = PLAYER_RADIUS;
@@ -2049,6 +2293,7 @@ function animate() {
   updatePlayer(dt);
   updateEntities(t, dt);
   updatePortals(t);
+  updateWormholes(t);
   updateSpaceObjects(dt);
   updateFlyHome(dt);
   updateRemoteCities(dt, t);
